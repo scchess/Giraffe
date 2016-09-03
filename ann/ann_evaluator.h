@@ -29,7 +29,7 @@
 #include "matrix_ops.h"
 #include "consts.h"
 
-#include "learn_ann.h"
+#include "ann_builder.h"
 
 //#define EVAL_HASH_STATS
 //#define LAZY_EVAL

@@ -31,7 +31,7 @@
 #include "matrix_ops.h"
 #include "board.h"
 #include "ann/features_conv.h"
-#include "ann/learn_ann.h"
+#include "ann/ann_builder.h"
 #include "omp_scoped_thread_limiter.h"
 #include "eval/eval.h"
 #include "history.h"

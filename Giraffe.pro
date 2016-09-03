@@ -24,7 +24,6 @@ SOURCES += main.cpp \
 	killer.cpp \
 	ann/ann.cpp \
 	tools/gen_bitboard_consts.cpp \
-	ann/learn_ann.cpp \
 	ann/features_conv.cpp \
 	learn.cpp \
 	random_device.cpp \
@@ -33,7 +32,8 @@ SOURCES += main.cpp \
 	static_move_evaluator.cpp \
 	ann/ann_move_evaluator.cpp \
     countermove.cpp \
-    history.cpp
+    history.cpp \
+    ann/ann_builder.cpp
 
 HEADERS += \
 	board_consts.h \
@@ -56,7 +56,6 @@ HEADERS += \
 	killer.h \
 	ann/ann.h \
 	ann/ann_impl.h \
-	ann/learn_ann.h \
 	ann/features_conv.h \
 	matrix_ops.h \
 	evaluator.h \
@@ -71,4 +70,5 @@ HEADERS += \
 	ann/ann_move_evaluator.h \
 	consts.h \
     countermove.h \
-    history.h
+    history.h \
+    ann/ann_builder.h

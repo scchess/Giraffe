@@ -37,7 +37,7 @@ ANNEvaluator::ANNEvaluator(const std::string &filename)
 
 void ANNEvaluator::BuildANN(int64_t inputDims)
 {
-	m_ann = LearnAnn::BuildEvalNet(inputDims, 1, false);
+	m_ann = AnnBuilder::BuildEvalNet(inputDims, 1, false);
 }
 
 void ANNEvaluator::Serialize(std::ostream &os)

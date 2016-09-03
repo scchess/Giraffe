@@ -50,7 +50,7 @@ ANNMoveEvaluator::ANNMoveEvaluator(ANNEvaluator &annEval)
 
 	FeaturesConv::GetMovesFeatureDescriptions(fds);
 
-	m_ann = LearnAnn::BuildMoveEvalNet(fds.size(), 1);
+	m_ann = AnnBuilder::BuildMoveEvalNet(fds.size(), 1);
 }
 
 void ANNMoveEvaluator::Train(const std::vector<std::string> &positions, const std::vector<std::string> &bestMoves)
