@@ -31,15 +31,18 @@ namespace Learn
 const static int64_t NumIterations = 1000000;
 const static float TDLambda = 0.7f; // this is discount due to credit assignment uncertainty
 const static float AbsLambda = 0.995f; // this is discount to encourage progress, and account for the snowball effect
-const static int64_t HalfMovesToMake = 30;
-const static size_t PositionsFirstIteration = 1000;
-const static int64_t PositionsPerBatch = 100;
-const static int64_t SGDBatchSize = 256;
-const static int64_t OptimizationIterationsPerBatch = 1;
-const static int64_t SearchNodeBudget = 512;
+const static int64_t HalfMovesToMake = 32;
+const static size_t PositionsFirstIteration = 100000;
+const static int64_t PositionsEarlyIterations = 100000;
+const static int64_t NumEarlyIteartions = 10;
+const static int64_t PositionsPerIteration = 1000000;
+const static int64_t SgdBatchSize = 1024;
+const static int64_t SgdEpochs = 10;
+const static int64_t SearchNodeBudget = 256;
 const static float LearningRateSGD = 1.0f;
-const static int64_t EvaluatorSerializeInterval = 100;
+const static int64_t EvaluatorSerializeInterval = 1;
 const static int64_t IterationPrintInterval = 1;
+const static std::string TrainingLogFileName = "training.log";
 
 void TDL(const std::string &positionsFilename);
 

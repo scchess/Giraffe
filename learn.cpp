@@ -107,9 +107,45 @@ void TDL(const std::string &positionsFilename)
 
 	std::cout << "Eval net built" << std::endl;
 
-	for (int64_t iteration = 0; iteration < NumIterations; ++iteration)
+	int32_t iteration = 0;
+	double timeOffset = 0.0f;
+
+	if (fileExists(TrainingLogFileName))
+	{
+		std::ifstream trainingLogFile(TrainingLogFileName);
+		std::string lastWrittenFileName;
+
+		std::string line;
+		while (std::getline(trainingLogFile, line))
+		{
+			if (line.size() > 0)
+			{
+				std::stringstream ss(line);
+				ss >> iteration;
+				ss >> lastWrittenFileName;
+				ss >> timeOffset;
+			}
+			else
+			{
+				break;
+			}
+		}
+
+		++iteration;
+		annEval = ANNEvaluator(lastWrittenFileName);
+
+		std::cout << "Restarting from iteration " << iteration << " last eval file: " << lastWrittenFileName << std::endl;
+	}
+
+	double startTime = CurrentTime() - timeOffset;
+
+	std::ofstream trainingLogFile(TrainingLogFileName, iteration == 0 ? std::ofstream::trunc : std::ofstream::app);
+
+	for (; iteration < NumIterations; ++iteration)
 	{
 		std::cout << "Iteration " << iteration << " ====================================" << std::endl;
+
+		double iterationStartTime = CurrentTime();
 
 		if (iteration == 0)
 		{
@@ -151,10 +187,10 @@ void TDL(const std::string &positionsFilename)
 				EvalNet::Activations act;
 				NNMatrixRM pred;
 
-				for (int64_t start = 0; start < (trainingBatch.rows() - SGDBatchSize); start += SGDBatchSize)
+				for (int64_t start = 0; start < (trainingBatch.rows() - SgdBatchSize); start += SgdBatchSize)
 				{
-					auto xBlock = trainingBatch.block(start, 0, SGDBatchSize, trainingBatch.cols());
-					auto targetsBlock = trainingTargets.block(start, 0, SGDBatchSize, 1);
+					auto xBlock = trainingBatch.block(start, 0, SgdBatchSize, trainingBatch.cols());
+					auto targetsBlock = trainingTargets.block(start, 0, SgdBatchSize, 1);
 
 					annEval.EvaluateForWhiteMatrix(xBlock, pred, act);
 
@@ -173,25 +209,13 @@ void TDL(const std::string &positionsFilename)
 		}
 		else
 		{
-			// a group of related positions (from the same root position)
-			struct TrainingGroupInfo
-			{
-				std::vector<NNVector> leaves;
+			std::vector<std::string> positions;
+			std::vector<float> targets;
 
-				enum class PositionType
-				{
-					EVAL, // the position's score matches eval of the leaf, and should be tuned
-					FIXED // this is an EGTB or draw-by-rule position, and should not be tuned
-				};
+			int64_t numPositionsApprox = iteration < NumEarlyIteartions ? PositionsEarlyIterations : PositionsPerIteration;
+			int64_t numRootPositions = numPositionsApprox / HalfMovesToMake;
 
-				std::vector<PositionType> positionTypes;
-
-				std::vector<float> unscaledScores;
-
-				int64_t GetSize() const { return static_cast<int64_t>(leaves.size()); }
-			};
-
-			std::vector<TrainingGroupInfo> trainingGroups;
+			std::cout << "Generating training positions..." << std::endl;
 
 			#pragma omp parallel
 			{
@@ -207,19 +231,17 @@ void TDL(const std::string &positionsFilename)
 				// make a copy of the evaluator because evaluator is not thread-safe (due to caching)
 				auto annEvalThread = annEval;
 
-				std::vector<float> featureConvTemp;
+				std::vector<std::string> threadPositions;
+				std::vector<float> threadTargets;
 
-				#pragma omp for schedule(dynamic, 1)
-				for (int64_t batchPosNum = 0; batchPosNum < PositionsPerBatch; ++batchPosNum)
+				#pragma omp for schedule(dynamic, 256)
+				for (int64_t rootPosNum = 0; rootPosNum < numRootPositions; ++rootPosNum)
 				{
-					TrainingGroupInfo group;
-
-					int64_t rootPosIdx = positionDrawFunc();
-					Board pos = Board(rootPositions[rootPosIdx]);
+					Board pos = Board(rootPositions[positionDrawFunc()]);
 
 					ttable.InvalidateAllEntries();
 
-					if (pos.GetGameStatus() == Board::ONGOING)
+					if (pos.GetGameStatus() == Board::ONGOING && (rootPosNum % 2) == 0)
 					{
 						// make 1 random move
 						// it's very important that we make an odd number of moves, so that if the move is something stupid, the
@@ -233,158 +255,103 @@ void TDL(const std::string &positionsFilename)
 						pos.ApplyMove(ml[movePickerDist(rng)]);
 					}
 
+					// if the game was already ended, or has now ended after the random move, skip
+					if (pos.GetGameStatus() != Board::ONGOING)
+					{
+						continue;
+					}
+
+					std::vector<std::pair<std::string, float>> playout;
+
 					// make a few moves, and store the leaves of each move into trainingBatch
 					for (int64_t moveNum = 0; moveNum < HalfMovesToMake; ++moveNum)
 					{
+						Search::SearchResult result = Search::SyncSearchNodeLimited(pos, SearchNodeBudget, &annEvalThread, &gStaticMoveEvaluator, &killer, &ttable, &counter, &history);
+
+						Board leaf = pos;
+						leaf.ApplyVariation(result.pv);
+
+						Score rootScoreWhite = result.score * (pos.GetSideToMove() == WHITE ? 1 : -1);
+
+						playout.push_back(std::make_pair(leaf.GetFen(), annEvalThread.UnScale(rootScoreWhite)));
+
+						pos.ApplyMove(result.pv[0]);
+						killer.MoveMade();
+						ttable.AgeTable();
+						history.NotifyMoveMade();
+
 						if (pos.GetGameStatus() != Board::ONGOING)
 						{
 							break;
 						}
-
-						Search::SearchResult result = Search::SyncSearchNodeLimited(pos, SearchNodeBudget, &annEvalThread, &gStaticMoveEvaluator, &killer, &ttable, &counter, &history);
-
-						Board leafPos = pos;
-						leafPos.ApplyVariation(result.pv);
-
-						Score rootScoreWhite = result.score * (pos.GetSideToMove() == WHITE ? 1 : -1);
-
-						// this should theoretically be the same as the search result, except for mates, etc
-						Score leafScore = annEvalThread.EvaluateForWhite(leafPos);
-
-						TrainingGroupInfo::PositionType posType;
-
-						if (result.pv.size() > 0 && (leafScore == rootScoreWhite))
-						{
-							posType = TrainingGroupInfo::PositionType::EVAL;
-						}
-						else
-						{
-							posType = TrainingGroupInfo::PositionType::FIXED;
-						}
-
-						group.unscaledScores.push_back(annEvalThread.UnScale(rootScoreWhite));
-						group.positionTypes.push_back(posType);
-
-						FeaturesConv::ConvertBoardToNN(leafPos, featureConvTemp);
-
-						{
-							NNVector featureVector = MapStdVector(featureConvTemp);
-							group.leaves.push_back(std::move(featureVector));
-						}
-
-						if (posType == TrainingGroupInfo::PositionType::EVAL)
-						{
-							pos.ApplyMove(result.pv[0]);
-							killer.MoveMade();
-							ttable.AgeTable();
-							history.NotifyMoveMade();
-						}
-						else
-						{
-							// if this is an end position already, don't make more moves
-							break;
-						}
 					}
 
-					#pragma omp critical(append_to_training_groups)
+					for (size_t i = 0; i < playout.size(); ++i)
 					{
-						assert(group.leaves.size() == group.positionTypes.size());
-						assert(group.leaves.size() == group.unscaledScores.size());
+						float target = playout[i].second;
+						float diffWeight = TDLambda;
 
-						trainingGroups.push_back(std::move(group));
+						for (size_t j = i + 1; j < playout.size(); ++j)
+						{
+							float scoreDiff = playout[j].second - playout[j - 1].second;
+							target += scoreDiff * diffWeight;
+							diffWeight *= TDLambda;
+						}
+
+						threadPositions.push_back(playout[i].first);
+						threadTargets.push_back(target);
 					}
 				}
-			}
 
-			int64_t totalNumPositions = 0;
-
-			for (const auto &group : trainingGroups)
-			{
-				totalNumPositions += group.GetSize();
-			}
-
-			NNMatrixRM trainingBatch(totalNumPositions, numFeatures);
-			NNMatrixRM pred(totalNumPositions, 1);
-			NNMatrixRM targets(totalNumPositions, 1);
-
-			// copy positions from position groups into one big matrix for performance
-			int64_t currentRow = 0;
-			for (const auto &group : trainingGroups)
-			{
-				for (const auto &leaf : group.leaves)
+				#pragma omp critical (mergeTrainingExamples)
 				{
-					trainingBatch.block(currentRow, 0, 1, numFeatures) = leaf;
-					++currentRow;
+					positions.insert(positions.end(), std::make_move_iterator(threadPositions.begin()), std::make_move_iterator(threadPositions.end()));
+					targets.insert(targets.end(), std::make_move_iterator(threadTargets.begin()), std::make_move_iterator(threadTargets.end()));
 				}
 			}
 
-			assert(currentRow == totalNumPositions);
+			std::cout << "Optimizing..." << std::endl;
+
+			double optimizationStartTime = CurrentTime();
+
+			NNMatrixRM trainingBatch(SgdBatchSize, numFeatures);
+			NNMatrixRM pred(SgdBatchSize, 1);
+			NNMatrixRM targetsBatch(SgdBatchSize, 1);
 
 			EvalNet::Activations act;
 
-			for (int64_t batchOptPass = 0; batchOptPass < OptimizationIterationsPerBatch; ++batchOptPass)
+			auto trainingPositionRng = gRd.MakeMT();
+			auto trainingPositionDist = std::uniform_int_distribution<size_t>(0, positions.size() - 1);
+			auto trainingPositionDrawFunc = std::bind(trainingPositionDist, trainingPositionRng);
+
+			float totalError = 0.0f;
+			int64_t sgdIterations = positions.size() / SgdBatchSize * SgdEpochs;
+
+			for (int64_t sgdStep = 0; sgdStep < sgdIterations; ++sgdStep)
 			{
-				// for each pass, we -
-				// 1. generate new predictions
-				// 2. use TD to generate new targets
-				// 3. do backprop using the new targets
-
-				annEval.EvaluateForWhiteMatrix(trainingBatch, pred, act);
-
-				int64_t currentRow = 0;
-
-				for (const auto &group : trainingGroups)
+				#pragma omp parallel
 				{
-					for (int64_t currentPosition = 0; currentPosition < group.GetSize(); ++currentPosition)
+					std::vector<float> featureConvTemp;
+
+					#pragma omp parallel for
+					for (int64_t sampleNumInBatch = 0; sampleNumInBatch < SgdBatchSize; ++sampleNumInBatch)
 					{
-						float target = 0.0f;
-
-						if (group.positionTypes[currentPosition] == TrainingGroupInfo::PositionType::FIXED)
-						{
-							// we have ground truth target for this position
-							target = group.unscaledScores[currentPosition];
-						}
-						else
-						{
-							// do TD
-							target = pred(currentRow, 0);
-
-							float discount = TDLambda;
-
-							float prevVal = target;
-
-							for (int64_t futurePos = currentPosition + 1; futurePos < group.GetSize(); ++futurePos)
-							{
-								float val = 0.0f;
-								// first we have to find out whether that position has a fixed score or not
-								// if it does, we use that fixed score
-								// otherwise, we use prediction
-
-								if (group.positionTypes[futurePos] == TrainingGroupInfo::PositionType::FIXED)
-								{
-									val = group.unscaledScores[futurePos];
-								}
-								else
-								{
-									val = pred(currentRow + futurePos - currentPosition, 0);
-								}
-
-								float diff = val - prevVal;
-								prevVal = val;
-
-								target += diff * discount;
-								discount *= TDLambda;
-							}
-						}
-
-						targets(currentRow, 0) = target;
-						++currentRow;
+						size_t positionIdx = trainingPositionDrawFunc();
+						Board b(positions[positionIdx]);
+						FeaturesConv::ConvertBoardToNN(b, featureConvTemp);
+						trainingBatch.block(sampleNumInBatch, 0, 1, numFeatures) = MapStdVector(featureConvTemp);
+						targetsBatch(sampleNumInBatch, 0) = targets[positionIdx];
 					}
 				}
 
-				float e = annEval.Train(pred, act, targets);
-				UNUSED(e);
+				annEval.EvaluateForWhiteMatrix(trainingBatch, pred, act);
+				totalError += annEval.Train(pred, act, targetsBatch);
 			}
+
+			std::cout << "Average error: " << (totalError / sgdIterations) << std::endl;
+			std::cout << "Optimization time: " << (CurrentTime() - optimizationStartTime) << std::endl;
+			std::cout << "Total time: " << (CurrentTime() - startTime) << std::endl;
+			std::cout << "Iteration took: " << (CurrentTime() - iterationStartTime) << std::endl;
 		}
 
 		if ((iteration % EvaluatorSerializeInterval) == 0)
@@ -394,6 +361,9 @@ void TDL(const std::string &positionsFilename)
 			std::ofstream annOut(getFilename(iteration));
 
 			annEval.Serialize(annOut);
+
+			trainingLogFile << iteration << ' ' << getFilename(iteration) << ' ' << (CurrentTime() - startTime) << std::endl;
+			trainingLogFile.flush();
 		}
 	}
 }
