@@ -64,6 +64,14 @@ public:
 	{
 		std::vector<NNMatrixRM> act; // input into each layer
 		std::vector<NNMatrixRM> actIn; // input into activation functions for each layer
+
+		/*
+		 * act[0] is the input to layer 0
+		 * act[1] is the input to layer 1
+		 *
+		 * actIn[0] is input to the activation function before layer 0
+		 * etc
+		 */
 	};
 
 	struct Gradients
@@ -80,6 +88,17 @@ public:
 			{
 				biasGradients[i] += other.biasGradients[i];
 				weightGradients[i] += other.weightGradients[i];
+			}
+
+			return *this;
+		}
+
+		Gradients &operator/=(float x)
+		{
+			for (size_t i = 0; i < biasGradients.size(); ++i)
+			{
+				biasGradients[i] /= x;
+				weightGradients[i] /= x;
 			}
 
 			return *this;
