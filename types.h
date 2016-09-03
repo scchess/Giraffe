@@ -238,6 +238,6 @@ private:
 	bool m_valid;
 };
 
-typedef uint64_t NodeBudget;
+typedef float NodeBudget;
 
 #endif // TYPES_H
