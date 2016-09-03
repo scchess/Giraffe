@@ -34,7 +34,7 @@
 #include "backend.h"
 #include "chessclock.h"
 #include "util.h"
-#include "ann/learn_ann.h"
+#include "ann/ann_builder.h"
 #include "ann/features_conv.h"
 #include "ann/ann_evaluator.h"
 #include "ann/ann_move_evaluator.h"

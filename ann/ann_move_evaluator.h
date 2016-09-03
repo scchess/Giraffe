@@ -26,7 +26,7 @@
 
 #include "ann_evaluator.h"
 #include "ann.h"
-#include "learn_ann.h"
+#include "ann_builder.h"
 #include "features_conv.h"
 #include "board.h"
 
