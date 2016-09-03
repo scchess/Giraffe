@@ -22,9 +22,6 @@
 
 #include "consts.h"
 
-constexpr float ANNEvaluator::BoundNetErrorAsymmetry;
-constexpr float ANNEvaluator::BoundNetTargetShift;
-
 ANNEvaluator::ANNEvaluator()
 	: m_evalHash(EvalHashSize)
 {
@@ -40,23 +37,17 @@ ANNEvaluator::ANNEvaluator(const std::string &filename)
 
 void ANNEvaluator::BuildANN(int64_t inputDims)
 {
-	m_mainAnn = LearnAnn::BuildEvalNet(inputDims, 1, false);
-	m_ubAnn = LearnAnn::BuildEvalNet(inputDims, 1, true);
-	m_lbAnn = LearnAnn::BuildEvalNet(inputDims, 1, true);
+	m_ann = LearnAnn::BuildEvalNet(inputDims, 1, false);
 }
 
 void ANNEvaluator::Serialize(std::ostream &os)
 {
-	SerializeNet(m_mainAnn, os);
-	SerializeNet(m_ubAnn, os);
-	SerializeNet(m_lbAnn, os);
+	SerializeNet(m_ann, os);
 }
 
 void ANNEvaluator::Deserialize(std::istream &is)
 {
-	DeserializeNet(m_mainAnn, is);
-	DeserializeNet(m_ubAnn, is);
-	DeserializeNet(m_lbAnn, is);
+	DeserializeNet(m_ann, is);
 
 	InvalidateCache();
 }
@@ -67,11 +58,11 @@ float ANNEvaluator::Train(const NNMatrixRM &pred, EvalNet::Activations &act, con
 
 	EvalNet::Gradients grad;
 
-	m_mainAnn.InitializeGradients(grad);
+	m_ann.InitializeGradients(grad);
 
-	m_mainAnn.BackwardPropagateComputeGrad(errorsDerivative, act, grad);
+	m_ann.BackwardPropagateComputeGrad(errorsDerivative, act, grad);
 
-	m_mainAnn.ApplyWeightUpdates(grad, 1.0f, 0.0f);
+	m_ann.ApplyWeightUpdates(grad, 1.0f, 0.0f);
 
 	InvalidateCache();
 
@@ -81,7 +72,7 @@ float ANNEvaluator::Train(const NNMatrixRM &pred, EvalNet::Activations &act, con
 float ANNEvaluator::Train(const NNMatrixRM &positions, const NNMatrixRM &targets)
 {
 	// in this version (where we don't have predictions already) we can simply call ANN's TrainGDM
-	float e = m_mainAnn.TrainGDM(positions, targets, 1.0f, 1.0f);
+	float e = m_ann.TrainGDM(positions, targets, 1.0f, 1.0f);
 
 	InvalidateCache();
 
@@ -92,119 +83,36 @@ void ANNEvaluator::EvaluateForWhiteMatrix(const NNMatrixRM &x, NNMatrixRM &pred,
 {
 	if (act.act.size() == 0)
 	{
-		m_mainAnn.InitializeActivations(act);
+		m_ann.InitializeActivations(act);
 	}
 
-	pred = m_mainAnn.ForwardPropagate(x, act);
+	pred = m_ann.ForwardPropagate(x, act);
 }
 
-void ANNEvaluator::TrainBounds(const std::vector<std::string> &positions, const std::vector<FeaturesConv::FeatureDescription> &featureDescriptions, float learningRate)
+Score ANNEvaluator::EvaluateForWhiteImpl(Board &b, Score /*lowerBound*/, Score /*upperBound*/)
 {
-	auto x = BoardsToFeatureRepresentation_(positions, featureDescriptions);
-
-	// after training the main net, we train the upper and lower bound nets, using new predictions
-	NNMatrixRM newTargets = m_mainAnn.ForwardPropagateFast(x);
-
-	EvalNet::Activations ubAct;
-	m_ubAnn.InitializeActivations(ubAct);
-
-	NNMatrixRM ubPredictions = m_ubAnn.ForwardPropagate(x, ubAct);
-
-	NNMatrixRM errorsDerivativeUb = ComputeErrorDerivatives_(ubPredictions, (newTargets.array() + BoundNetTargetShift).matrix(), ubAct.actIn[ubAct.actIn.size() - 1], 1.0f, BoundNetErrorAsymmetry);
-
-	EvalNet::Gradients ubGrad;
-
-	m_ubAnn.InitializeGradients(ubGrad);
-
-	m_ubAnn.BackwardPropagateComputeGrad(errorsDerivativeUb, ubAct, ubGrad);
-
-	m_ubAnn.ApplyWeightUpdates(ubGrad, learningRate, 0.0f);
-
-	EvalNet::Activations lbAct;
-	m_lbAnn.InitializeActivations(lbAct);
-
-	NNMatrixRM lbPredictions = m_lbAnn.ForwardPropagate(x, lbAct);
-
-	NNMatrixRM errorsDerivativeLb = ComputeErrorDerivatives_(lbPredictions, (newTargets.array() - BoundNetTargetShift).matrix(), lbAct.actIn[lbAct.actIn.size() - 1], BoundNetErrorAsymmetry, 1.0f);
-
-	EvalNet::Gradients lbGrad;
-
-	m_lbAnn.InitializeGradients(lbGrad);
-
-	m_lbAnn.BackwardPropagateComputeGrad(errorsDerivativeLb, lbAct, lbGrad);
-
-	m_lbAnn.ApplyWeightUpdates(lbGrad, learningRate, 0.0f);
-
-	InvalidateCache();
-}
-
-Score ANNEvaluator::EvaluateForWhiteImpl(Board &b, Score lowerBound, Score upperBound)
-{
-	auto hashResult = HashProbe_(b, lowerBound, upperBound);
+	auto hashResult = HashProbe_(b);
 
 	if (hashResult)
 	{
 		return *hashResult;
 	}
 
-	/*
-	static uint64_t hits = 0;
-	static uint64_t misses = 0;
-	static std::set<size_t> seen;
-
-	Board::SlowFeatures sf;
-	b.GetSlowFeatures(sf);
-	size_t hash = sf.Hash();
-
-	if (seen.find(hash) != seen.end())
-	{
-		++hits;
-	}
-	else
-	{
-		++misses;
-		seen.insert(hash);
-	}
-
-	if (((misses + hits) % 1000000) == 0)
-	{
-		std::cout << hits << "/" << misses << " (" << (static_cast<float>(hits) / (hits + misses)) << ")" << std::endl;
-	}
-	*/
-
 	FeaturesConv::ConvertBoardToNN(b, m_convTmp);
 
 	// we have to map every time because the vector's buffer could have moved
 	Eigen::Map<NNVector> mappedVec(&m_convTmp[0], 1, m_convTmp.size());
 
-#ifdef LAZY_EVAL
-	Score ub = (m_ubAnn.ForwardPropagateSingle(mappedVec) + BoundEvalShift) * EvalFullScale;
-
-	if (ub <= lowerBound)
-	{
-		HashStore_(b, ub, EvalHashEntry::EntryType::UPPERBOUND);
-		return ub;
-	}
-
-	Score lb = (m_lbAnn.ForwardPropagateSingle(mappedVec) - BoundEvalShift) * EvalFullScale;
-
-	if (lb >= upperBound)
-	{
-		HashStore_(b, lb, EvalHashEntry::EntryType::LOWERBOUND);
-		return lb;
-	}
-#endif
-
-	float annOut = m_mainAnn.ForwardPropagateSingle(mappedVec);
+	float annOut = m_ann.ForwardPropagateSingle(mappedVec);
 
 	Score nnRet = annOut * EvalFullScale;
 
-	HashStore_(b, nnRet, EvalHashEntry::EntryType::EXACT);
+	HashStore_(b, nnRet);
 
 	return nnRet;
 }
 
-void ANNEvaluator::BatchEvaluateForWhiteImpl(std::vector<Board> &positions, std::vector<Score> &results, Score lowerBound, Score upperBound)
+void ANNEvaluator::BatchEvaluateForWhiteImpl(std::vector<Board> &positions, std::vector<Score> &results, Score /*lowerBound*/, Score /*upperBound*/)
 {
 	// some entries may already be in cache
 	// these are the ones we need to evaluate
@@ -214,7 +122,7 @@ void ANNEvaluator::BatchEvaluateForWhiteImpl(std::vector<Board> &positions, std:
 
 	for (size_t i = 0; i < positions.size(); ++i)
 	{
-		auto hashResult = HashProbe_(positions[i], lowerBound, upperBound);
+		auto hashResult = HashProbe_(positions[i]);
 
 		if (hashResult)
 		{
@@ -244,7 +152,7 @@ void ANNEvaluator::BatchEvaluateForWhiteImpl(std::vector<Board> &positions, std:
 		}
 	}
 
-	auto annResults = m_mainAnn.ForwardPropagateFast(xNN);
+	auto annResults = m_ann.ForwardPropagateFast(xNN);
 
 	for (size_t idx = 0; idx < toEvaluate.size(); ++idx)
 	{
@@ -252,7 +160,7 @@ void ANNEvaluator::BatchEvaluateForWhiteImpl(std::vector<Board> &positions, std:
 
 		results[toEvaluate[idx]] = result;
 
-		HashStore_(positions[toEvaluate[idx]], result, EvalHashEntry::EntryType::EXACT);
+		HashStore_(positions[toEvaluate[idx]], result);
 	}
 }
 
@@ -262,9 +170,7 @@ void ANNEvaluator::PrintDiag(Board &board)
 
 	Eigen::Map<NNVector> mappedVec(&m_convTmp[0], 1, m_convTmp.size());
 
-	std::cout << "Val: " << m_mainAnn.ForwardPropagateSingle(mappedVec) << std::endl;
-	std::cout << "UB: " << m_ubAnn.ForwardPropagateSingle(mappedVec) << std::endl;
-	std::cout << "LB: " << m_lbAnn.ForwardPropagateSingle(mappedVec) << std::endl;
+	std::cout << "Val: " << m_ann.ForwardPropagateSingle(mappedVec) << std::endl;
 }
 
 void ANNEvaluator::InvalidateCache()
@@ -273,29 +179,6 @@ void ANNEvaluator::InvalidateCache()
 	{
 		entry.hash = 0;
 	}
-}
-
-bool ANNEvaluator::CheckBounds(Board &board, float &windowSize)
-{
-	FeaturesConv::ConvertBoardToNN(board, m_convTmp);
-
-	Eigen::Map<NNVector> mappedVec(&m_convTmp[0], 1, m_convTmp.size());
-
-	auto exact = m_mainAnn.ForwardPropagateSingle(mappedVec);
-	auto ub = m_ubAnn.ForwardPropagateSingle(mappedVec) + BoundEvalShift;
-	auto lb = m_lbAnn.ForwardPropagateSingle(mappedVec) - BoundEvalShift;
-
-	windowSize = fabs(ub - lb);
-
-	if (!((exact <= ub) && (exact >= lb)))
-	{
-/*
-#pragma omp critical
-		std::cout << exact << " " << ub << " " << lb << std::endl;
-*/
-	}
-
-	return (exact <= ub) && (exact >= lb);
 }
 
 NNMatrixRM ANNEvaluator::BoardsToFeatureRepresentation_(const std::vector<std::string> &positions, const std::vector<FeaturesConv::FeatureDescription> &featureDescriptions)
