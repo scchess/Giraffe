@@ -1,3 +1,9 @@
 #!/bin/bash
 
-scp hpc:/work/ml614/giraffe/eval.net .
+if [ $# -eq 0 ]
+  then
+    echo "Usage: $0 <file>"
+    exit
+fi
+
+scp gc:/home/matthewlai/giraffe/$1 .
