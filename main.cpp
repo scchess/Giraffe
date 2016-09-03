@@ -48,6 +48,7 @@
 
 const std::string EvalNetFilename = "eval.net";
 const std::string MoveEvalNetFilename = "meval.net";
+const std::string InitFileName = "init.txt";
 
 std::string gVersion;
 
@@ -495,13 +496,21 @@ int main(int argc, char **argv)
 
 	auto waitForSlowInitFunc = [&initThread, &coutMtx]() { coutMtx.unlock(); initThread.join(); coutMtx.lock(); };
 
+	std::ifstream initFile(InitFileName);
+
 	while (true)
 	{
 		std::string lineStr;
-
-		coutMtx.unlock();
-		std::getline(std::cin, lineStr);
-		coutMtx.lock();
+		if (std::getline(initFile, lineStr))
+		{
+			std::cout << "# From init file: " << lineStr << std::endl;
+		}
+		else
+		{
+			coutMtx.unlock();
+			std::getline(std::cin, lineStr);
+			coutMtx.lock();
+		}
 
 		std::stringstream line(lineStr);
 
