@@ -242,7 +242,7 @@ Score Search(RootSearchContext &context, std::vector<Move> &pv, Board &board, Sc
 
 	// switch to QSearch if we are out of nodes
 	// using < 1 guarantees that a root search with nodeBudget 1 will always do a full ply
-	if (nodeBudget < 1 || ply > MaxRecursionDepth)
+	if (nodeBudget < 1.0f || ply > MaxRecursionDepth)
 	{
 		TTEntry *tEntry = ENABLE_TT ? context.transpositionTable->Probe(board.GetHash()) : 0;
 
@@ -316,7 +316,7 @@ Score Search(RootSearchContext &context, std::vector<Move> &pv, Board &board, Sc
 
 	NodeBudget originalNodeBudget = nodeBudget;
 
-	--nodeBudget; // for this node
+	nodeBudget *= 0.9999f;
 
 	bool isRoot = ply == 0;
 
