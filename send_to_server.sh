@@ -7,14 +7,14 @@ fi
 
 VER=$1
 
-TARGET="/vol/bitbucket/ml614/playground/players/$VER"
+TARGET="/home/matthewlai/playground/players/$VER"
 
-ssh ic mkdir $TARGET
+ssh gc mkdir $TARGET
 
-rsync -avz --exclude '.hg' --exclude '*.epd' --exclude 'Eigen_stable' --exclude '*.o' --exclude '*.a' --exclude '*.d' --exclude 'giraffe' . ic:$TARGET/
+rsync -avz --exclude '.hg' --include 'sts.epd' --exclude '*.epd' --exclude '*.log' --exclude '*.o' --exclude '*.a' --exclude '*.d' --exclude 'giraffe' . gc:$TARGET/
 
 echo $VER > version_tmp.txt
 
-scp -r version_tmp.txt ic:$TARGET/version.txt
+scp -r version_tmp.txt gc:$TARGET/version.txt
 
 rm version_tmp.txt
