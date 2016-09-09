@@ -31,7 +31,6 @@
 #include "matrix_ops.h"
 #include "board.h"
 #include "ann/features_conv.h"
-#include "ann/ann_builder.h"
 #include "omp_scoped_thread_limiter.h"
 #include "eval/eval.h"
 #include "history.h"
@@ -55,7 +54,7 @@ std::string getFilename(int64_t iter)
 {
 	std::stringstream filenameSs;
 
-	filenameSs << "trainingResults/eval" << iter << ".net";
+	filenameSs << "trainingResults/eval" << iter << ".t7";
 
 	return filenameSs.str();
 }
@@ -118,7 +117,7 @@ void TDL(const std::string &positionsFilename)
 		std::string line;
 		while (std::getline(trainingLogFile, line))
 		{
-			if (line.size() > 0)
+			if (line.size() > 1)
 			{
 				std::stringstream ss(line);
 				ss >> iteration;
@@ -131,10 +130,14 @@ void TDL(const std::string &positionsFilename)
 			}
 		}
 
-		++iteration;
-		annEval = ANNEvaluator(lastWrittenFileName);
+		if (lastWrittenFileName != "")
+		{
+			++iteration;
 
-		std::cout << "Restarting from iteration " << iteration << " last eval file: " << lastWrittenFileName << std::endl;
+			annEval = ANNEvaluator(lastWrittenFileName);
+
+			std::cout << "Restarting from iteration " << iteration << " last eval file: " << lastWrittenFileName << std::endl;
+		}
 	}
 
 	double startTime = CurrentTime() - timeOffset;
@@ -184,27 +187,16 @@ void TDL(const std::string &positionsFilename)
 
 			for (size_t i = 0; i < 10; ++i)
 			{
-				EvalNet::Activations act;
-				NNMatrixRM pred;
-
+				float lossSum = 0.0f;
+				int64_t numBatches = 0;
 				for (int64_t start = 0; start < (trainingBatch.rows() - SgdBatchSize); start += SgdBatchSize)
 				{
 					auto xBlock = trainingBatch.block(start, 0, SgdBatchSize, trainingBatch.cols());
 					auto targetsBlock = trainingTargets.block(start, 0, SgdBatchSize, 1);
-
-					annEval.EvaluateForWhiteMatrix(xBlock, pred, act);
-
-					float e = annEval.Train(pred, act, targetsBlock);
-
-					UNUSED(e);
-
-					#if 0
-					if (start == 0)
-					{
-						std::cout << e << std::endl;
-					}
-					#endif
+					lossSum += annEval.Train(xBlock, targetsBlock);
+					++numBatches;
 				}
+				std::cout << "Iteration " << i << " loss: " << lossSum / numBatches << std::endl;
 			}
 		}
 		else
@@ -217,6 +209,8 @@ void TDL(const std::string &positionsFilename)
 
 			std::cout << "Generating training positions..." << std::endl;
 
+			auto annParams = annEval.ToString();
+
 			#pragma omp parallel
 			{
 				Killer killer;
@@ -228,18 +222,21 @@ void TDL(const std::string &positionsFilename)
 				auto positionDist = std::uniform_int_distribution<size_t>(0, rootPositions.size() - 1);
 				auto positionDrawFunc = std::bind(positionDist, rng);
 
+				ttable.InvalidateAllEntries();
+
 				// make a copy of the evaluator because evaluator is not thread-safe (due to caching)
-				auto annEvalThread = annEval;
+				ANNEvaluator annEvalThread(true /* Eigen-only */);
+				annEvalThread.FromString(annParams);
 
 				std::vector<std::string> threadPositions;
 				std::vector<float> threadTargets;
 
-				#pragma omp for schedule(dynamic, 256)
+				std::vector<std::pair<std::string, float>> playout;
+
+				#pragma omp for schedule(dynamic, 64)
 				for (int64_t rootPosNum = 0; rootPosNum < numRootPositions; ++rootPosNum)
 				{
 					Board pos = Board(rootPositions[positionDrawFunc()]);
-
-					ttable.InvalidateAllEntries();
 
 					if (pos.GetGameStatus() == Board::ONGOING && (rootPosNum % 2) == 0)
 					{
@@ -261,7 +258,7 @@ void TDL(const std::string &positionsFilename)
 						continue;
 					}
 
-					std::vector<std::pair<std::string, float>> playout;
+					playout.clear();
 
 					// make a few moves, and store the leaves of each move into trainingBatch
 					for (int64_t moveNum = 0; moveNum < HalfMovesToMake; ++moveNum)
@@ -315,10 +312,7 @@ void TDL(const std::string &positionsFilename)
 			double optimizationStartTime = CurrentTime();
 
 			NNMatrixRM trainingBatch(SgdBatchSize, numFeatures);
-			NNMatrixRM pred(SgdBatchSize, 1);
 			NNMatrixRM targetsBatch(SgdBatchSize, 1);
-
-			EvalNet::Activations act;
 
 			auto trainingPositionRng = gRd.MakeMT();
 			auto trainingPositionDist = std::uniform_int_distribution<size_t>(0, positions.size() - 1);
@@ -333,7 +327,7 @@ void TDL(const std::string &positionsFilename)
 				{
 					std::vector<float> featureConvTemp;
 
-					#pragma omp parallel for
+					#pragma omp for
 					for (int64_t sampleNumInBatch = 0; sampleNumInBatch < SgdBatchSize; ++sampleNumInBatch)
 					{
 						size_t positionIdx = trainingPositionDrawFunc();
@@ -344,8 +338,7 @@ void TDL(const std::string &positionsFilename)
 					}
 				}
 
-				annEval.EvaluateForWhiteMatrix(trainingBatch, pred, act);
-				totalError += annEval.Train(pred, act, targetsBatch);
+				totalError += annEval.Train(trainingBatch, targetsBatch);
 			}
 
 			std::cout << "Average error: " << (totalError / sgdIterations) << std::endl;
@@ -358,9 +351,7 @@ void TDL(const std::string &positionsFilename)
 		{
 			std::cout << "Serializing " << getFilename(iteration) << "..." << std::endl;
 
-			std::ofstream annOut(getFilename(iteration));
-
-			annEval.Serialize(annOut);
+			annEval.Serialize(getFilename(iteration));
 
 			trainingLogFile << iteration << ' ' << getFilename(iteration) << ' ' << (CurrentTime() - startTime) << std::endl;
 			trainingLogFile.flush();

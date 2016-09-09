@@ -26,7 +26,6 @@
 
 #include "ann_evaluator.h"
 #include "ann.h"
-#include "ann_builder.h"
 #include "features_conv.h"
 #include "board.h"
 
@@ -44,19 +43,17 @@ public:
 
 	void Test(const std::vector<std::string> &positions, const std::vector<std::string> &bestMoves);
 
-	virtual void NotifyBestMove(Board &board, SearchInfo &si, MoveInfoList &list, Move bestMove, size_t movesSearched) override;
-
 	virtual void EvaluateMoves(Board &board, SearchInfo &si, MoveInfoList &list, MoveList &ml);
 
 	virtual void PrintDiag(Board &b) override;
 
-	void Serialize(std::ostream &os);
-	void Deserialize(std::istream &is);
+	void Serialize(const std::string &filename);
+	void Deserialize(const std::string &filename);
 
 private:
 	void GenerateMoveConvInfo_(Board &board, MoveList &ml, FeaturesConv::ConvertMovesInfo &convInfo);
 
-	MoveEvalNet m_ann;
+	ANN m_ann;
 
 	// we need to have an ANN evaluator to generate signatures
 	ANNEvaluator &m_annEval;

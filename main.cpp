@@ -34,7 +34,7 @@
 #include "backend.h"
 #include "chessclock.h"
 #include "util.h"
-#include "ann/ann_builder.h"
+#include "ann/eigen_ann.h"
 #include "ann/features_conv.h"
 #include "ann/ann_evaluator.h"
 #include "ann/ann_move_evaluator.h"
@@ -46,8 +46,8 @@
 
 #include "Eigen/Dense"
 
-const std::string EvalNetFilename = "eval.net";
-const std::string MoveEvalNetFilename = "meval.net";
+const std::string EvalNetFilename = "eval.t7";
+const std::string MoveEvalNetFilename = "meval.t7";
 const std::string InitFileName = "init.txt";
 
 std::string gVersion;
@@ -79,14 +79,14 @@ void InitializeSlow(ANNEvaluator &evaluator, ANNMoveEvaluator &mevaluator, std::
 
 	if (evalNet)
 	{
-		evaluator.Deserialize(evalNet);
+		evaluator.Deserialize(EvalNetFilename);
 	}
 
 	std::ifstream mevalNet(MoveEvalNetFilename);
 
 	if (mevalNet)
 	{
-		mevaluator.Deserialize(mevalNet);
+		mevaluator.Deserialize(MoveEvalNetFilename);
 	}
 
 	initOutput += GTB::Init();
@@ -135,20 +135,20 @@ int main(int argc, char **argv)
 {
 	InitializeFast();
 
-	Backend backend;
-
 	ANNEvaluator evaluator;
 
 	ANNMoveEvaluator mevaluator(evaluator);
 
-	// if eval.net exists, use the ANN evaluator
-	// if both eval.net and meval.net exist, use the ANN move evaluator
+	Backend backend;
+
+	// if eval.t7 exists, use the ANN evaluator
+	// if both eval.t7 and meval.t7 exist, use the ANN move evaluator
 
 	if (!FileReadable(EvalNetFilename) && argc == 1)
 	{
 		// in normal playing mode (giraffe run without argument), we should
 		// refuse to run without the net files
-		std::cout << "tellusererror " << "eval.net not found in the working directory. Aborting." << std::endl;
+		std::cout << "tellusererror " << EvalNetFilename << " not found in the working directory. Aborting." << std::endl;
 		return 0;
 	}
 
@@ -214,6 +214,11 @@ int main(int argc, char **argv)
 
 		std::vector<FeaturesConv::FeatureDescription> ret;
 		FeaturesConv::ConvertBoardToNN(b, ret);
+
+		for (auto &fd : ret)
+		{
+			std::cout << fd.ToString() << std::endl;
+		}
 
 		return 0;
 	}
@@ -306,9 +311,12 @@ int main(int argc, char **argv)
 			++numPositions;
 		}
 
+		std::string evaluatorParams = evaluator.ToString();
+
 		#pragma omp parallel
 		{
-			auto evaluatorCopy = evaluator;
+			ANNEvaluator evaluatorCopy;
+			evaluatorCopy.FromString(evaluatorParams);
 
 			#pragma omp for
 			for (size_t i = 0; i < fens.size(); ++i)
@@ -369,9 +377,12 @@ int main(int argc, char **argv)
 		double lastPrintTime = CurrentTime();
 		size_t lastDoneCount = 0;
 
+		std::string evaluatorParams = evaluator.ToString();
+
 		#pragma omp parallel
 		{
-			auto evaluatorCopy = evaluator;
+			ANNEvaluator evaluatorCopy;
+			evaluatorCopy.FromString(evaluatorParams);
 
 			#pragma omp for schedule(dynamic)
 			for (size_t i = 0; i < fens.size(); ++i)
@@ -478,9 +489,7 @@ int main(int argc, char **argv)
 
 		meval.Test(fensTest, bestMovesTest);
 
-		std::ofstream outfile(argv[3]);
-
-		meval.Serialize(outfile);
+		meval.Serialize(argv[3]);
 
 		return 0;
 	}

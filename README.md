@@ -6,7 +6,7 @@ For more information, see: http://arxiv.org/abs/1509.01549
 
 Giraffe is written in C++11.
 
-If you decide to compile Giraffe yourself, please grab the neural network definition files (eval.net and meval.net) from the binary distribution. They must be in Giraffe's working directory when Giraffe is started. Instructions on how to generate those files will be added later.
+If you decide to compile Giraffe yourself, please grab the neural network definition files (eval.t7 and meval.t7) from the binary distribution. They must be in Giraffe's working directory when Giraffe is started. Instructions on how to generate those files will be added later.
 
 ## Gaviota Tablebases ##
 To use Gaviota tablebases, set the path through the GaviotaTbPath option.
@@ -34,7 +34,7 @@ where n is the number of cores you have.
 
 It will periodically take a snapshot of the network, and store it in trainingResults/. You can stop the training (Ctrl-C) at any time.
 
-Copy the latest file from trainingResults/ into the parent directory (where giraffe is), and rename it to eval.net.
+Copy the latest file from trainingResults/ into the parent directory (where giraffe is), and rename it to eval.t7.
 
 It converges in about 72 hours on a 20-core Haswell Xeon (there is currently no automatic convergence detection, so you have to test snapshots periodically yourself, using whatever method you want - I used the STS).
 
@@ -56,7 +56,10 @@ OMP_NUM_THREADS=n ./giraffe label_bm internal.fen internal_labeled.fen
 * Finally, we can train the move evaluator network:
 ```
 #!bash
-OMP_NUM_THREADS=n ./giraffe train_move_eval internal_labeled.fen meval.net
+OMP_NUM_THREADS=n ./giraffe train_move_eval internal_labeled.fen meval.t7
 ```
 
-That should give you meval.net in the end, and we are all done! eval.net is the position evaluation network, and meval.net is the move evaluation network. They should be in the working directory when giraffe is run. Run ./giraffe on the command line, and make sure that it says it's using the move evaluator network.
+That should give you meval.t7 in the end, and we are all done! eval.t7 is the position evaluation network, and meval.t7 is the move evaluation network. They should be in the working directory when giraffe is run. Run ./giraffe on the command line, and make sure that it says it's using the move evaluator network.
+
+## Torch Notes ##
+Set OPENBLAS_NUM_THREADS=1. It's more efficient to do threading at a higher level.

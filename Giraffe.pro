@@ -33,7 +33,8 @@ SOURCES += main.cpp \
 	ann/ann_move_evaluator.cpp \
     countermove.cpp \
     history.cpp \
-    ann/ann_builder.cpp
+    ann/ann.cpp \
+    ann/eigen_ann.cpp
 
 HEADERS += \
 	board_consts.h \
@@ -55,7 +56,6 @@ HEADERS += \
 	ttable.h \
 	killer.h \
 	ann/ann.h \
-	ann/ann_impl.h \
 	ann/features_conv.h \
 	matrix_ops.h \
 	evaluator.h \
@@ -71,4 +71,4 @@ HEADERS += \
 	consts.h \
     countermove.h \
     history.h \
-    ann/ann_builder.h
+    ann/eigen_ann.h

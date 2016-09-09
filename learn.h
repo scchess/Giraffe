@@ -39,7 +39,6 @@ const static int64_t PositionsPerIteration = 1000000;
 const static int64_t SgdBatchSize = 1024;
 const static int64_t SgdEpochs = 10;
 const static int64_t SearchNodeBudget = 256;
-const static float LearningRateSGD = 1.0f;
 const static int64_t EvaluatorSerializeInterval = 1;
 const static int64_t IterationPrintInterval = 1;
 const static std::string TrainingLogFileName = "training.log";
