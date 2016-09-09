@@ -18,224 +18,231 @@
 #ifndef ANN_H
 #define ANN_H
 
-#include <array>
-#include <algorithm>
 #include <random>
-#include <functional>
-#include <memory>
-#include <exception>
-#include <thread>
-#include <condition_variable>
-#include <mutex>
-#include <atomic>
+#include <string>
 #include <ostream>
 #include <istream>
+#include <iostream>
+#include <mutex>
 
 #include <cmath>
 #include <cassert>
 
 #include <omp.h>
 
+#include <lua.hpp>
+#include <luaT.h>
+#include <lauxlib.h>
+#include <TH/THTensor.h>
+
+#include "eigen_ann.h"
 #include "matrix_ops.h"
 
-enum ActivationFunc
+namespace
 {
-	Linear,
-	Tanh,
-	Relu,
-	Softmax,
-	Logsig
-};
-
-template <ActivationFunc ACTF, ActivationFunc ACTFLast>
-class FCANN
+template<int NUM_ARGUMENTS, int NUM_RETS>
+class LuaFunctionCall
 {
 public:
-	FCANN() {}
-
-	// initialize with random weights
-	FCANN(
-		size_t inputs,
-		size_t outputs,
-		std::vector<size_t> hiddenLayers,
-		std::vector<std::vector<Eigen::Triplet<FP> > > &connectionMatrices);
-
-	struct Activations
+	LuaFunctionCall(lua_State *state, const char *name)
+		: m_state(state), m_name(name)
 	{
-		std::vector<NNMatrixRM> act; // input into each layer
-		std::vector<NNMatrixRM> actIn; // input into activation functions for each layer
+		lua_getglobal(m_state, name);
+	}
 
-		/*
-		 * act[0] is the input to layer 0
-		 * act[1] is the input to layer 1
-		 *
-		 * actIn[0] is input to the activation function before layer 0
-		 * etc
-		 */
-	};
-
-	struct Gradients
+	void PushString(const std::string &str)
 	{
-		std::vector<NNVector> biasGradients;
-		std::vector<NNMatrix> weightGradients;
+		lua_pushstring(m_state, str.c_str());
+		++m_numArgsPushed;
+	}
 
-		Gradients &operator+=(const Gradients &other)
-		{
-			assert(biasGradients.size() == other.biasGradients.size());
-			assert(weightGradients.size() == other.weightGradients.size());
-
-			for (size_t i = 0; i < biasGradients.size(); ++i)
-			{
-				biasGradients[i] += other.biasGradients[i];
-				weightGradients[i] += other.weightGradients[i];
-			}
-
-			return *this;
-		}
-
-		Gradients &operator/=(float x)
-		{
-			for (size_t i = 0; i < biasGradients.size(); ++i)
-			{
-				biasGradients[i] /= x;
-				weightGradients[i] /= x;
-			}
-
-			return *this;
-		}
-	};
-
-	class LearningRateException : public std::runtime_error
+	void PushInt(int x)
 	{
-	public:
-		LearningRateException() : std::runtime_error("Learning rate too high!") {}
-	};
+		lua_pushinteger(m_state, x);
+		++m_numArgsPushed;
+	}
 
-	void InitializeActivations(Activations &act);
-
-	void InitializeGradients(Gradients &grad);
-
-	template <typename Derived>
-	NNMatrixRM ForwardPropagate(const MatrixBase<Derived> &in, Activations &act);
-
-	// same as ForwardPropagate, but doesn't bother with Activations (NOT REENTRANT!!)
-	template <typename Derived>
-	NNMatrixRM ForwardPropagateFast(const MatrixBase<Derived> &in);
-
-	// special case for 1 board and single-valued output - this is used in gameplay (NOT REENTRANT!!)
-	template <typename Derived>
-	float ForwardPropagateSingle(const MatrixBase<Derived> &vec);
-
-	// special case for eval while also reading out signature
-	template <typename Derived>
-	float ForwardPropagateSingleWithSignature(const MatrixBase<Derived> &vec, float *signOut);
-
-	template <typename Derived>
-	void BackwardPropagateComputeGrad(const MatrixBase<Derived> &err, const Activations &act, Gradients &grad);
-
-	// this is a convenience function that simply runs 1 iteration of GDM
-	template <typename Derived1, typename Derived2>
-	float TrainGDM(const MatrixBase<Derived1> &x, const MatrixBase<Derived2> &y, float learningRate, float reg);
-
-	void ApplyWeightUpdates(const Gradients &grad, float learningRate, float reg);
-
-	float GetSparsity();
-
-	typedef NNVector BiasType;
-	typedef NNMatrix WeightType;
-	typedef NNMatrix WeightMaskType;
-
-	// these are used to save and restore nets
-	std::vector<BiasType> &Biases() { return m_params.outputBias; }
-	std::vector<WeightType> &Weights() { m_params.weightsSemiSparseCurrent = false; return m_params.weights; }
-	std::vector<WeightMaskType> &WeightMasks() { return m_params.weightMasks; }
-
-	void NotifyWeightMasksChanged() { UpdateWeightMasksRegions_(); }
-
-	int64_t OutputCols() const { return m_params.weights[m_params.weights.size() - 1].cols(); }
-
-	template <typename Derived1, typename Derived2>
-	NNMatrixRM ErrorFunc(const MatrixBase<Derived1> &pred, const MatrixBase<Derived2> &targets) const;
-
-	template <typename Derived1, typename Derived2, typename Derived3>
-	NNMatrixRM ErrorFuncDerivative(const MatrixBase<Derived1> &pred, const MatrixBase<Derived2> &targets, const MatrixBase<Derived3> &finalLayerActivations) const;
-
-private:
-	template <typename Derived>
-	void Activate_(MatrixBase<Derived> &x, bool last) const;
-
-	template <typename Derived>
-	void ActivateDerivative_(MatrixBase<Derived> &x) const;
-
-	void GetThreadBlock_(int64_t numTotal, int64_t &begin, int64_t &num)
+	void PushTensor(THFloatTensor *tensor)
 	{
-		size_t threadId = omp_get_thread_num();
-		size_t numThreads = omp_get_num_threads();
+		THFloatTensor_retain(tensor);
+		luaT_pushudata(m_state, (void *) tensor, "torch.FloatTensor");
+		++m_numArgsPushed;
+	}
 
-		size_t rowsPerThread = numTotal / numThreads;
-		size_t rem = numTotal % numThreads; // the first "rem" threads get 1 extra row
+	float PopNumber()
+	{
+		float ret = lua_tonumber(m_state, -1);
+		lua_remove(m_state, -1);
+		++m_numRetsPopped;
+		return ret;
+	}
 
-		if (threadId < rem)
+	THFloatTensor* PopTensor()
+	{
+		THFloatTensor *ret = reinterpret_cast<THFloatTensor*>(luaT_toudata(m_state, -1, "torch.FloatTensor"));
+		lua_remove(m_state, -1);
+		++m_numRetsPopped;
+		return ret;
+	}
+
+	std::string PopString()
+	{
+		const char *p = lua_tostring(m_state, -1);
+		std::string ret = p;
+		lua_remove(m_state, -1);
+		++m_numRetsPopped;
+		return ret;
+	}
+
+	void Call()
+	{
+		assert(m_numArgsPushed == NUM_ARGUMENTS);
+		if (lua_pcall(m_state, NUM_ARGUMENTS, NUM_RETS, 0) != 0)
 		{
-			begin = threadId * (rowsPerThread + 1);
-			num = rowsPerThread + 1;
-		}
-		else
-		{
-			begin = rem * (rowsPerThread + 1) + (threadId - rem) * rowsPerThread;
-			num = rowsPerThread;
+			std::cerr << "Lua function call " << m_name << " failed: " << lua_tostring(m_state, -1) << std::endl;
+			assert(false);
 		}
 	}
 
-	void UpdateWeightMasksRegions_();
-
-	void UpdateWeightSemiSparse_();
-
-	void InitializeOptimizationState_();
-
-	// this is used to ensure network stability
-	constexpr static FP MAX_WEIGHT = 1000.0f;
-
-	// these are network parameters that should be copied by copy ctor and assignment operator
-	struct Params
+	~LuaFunctionCall()
 	{
-		// bias, weights, and weightMasks completely define the net
-		std::vector<BiasType> outputBias;
-		std::vector<WeightType> weights;
-		std::vector<WeightMaskType> weightMasks;
+		if (m_numRetsPopped != NUM_RETS)
+		{
+			std::cerr << "Wrong number of return values popped! " << m_name << std::endl;
+			assert(false);
+		}
+	}
 
-		// optimized form of weight masks (in lists of regions)
-		std::vector<std::vector<MatrixRegion> > weightMasksRegions;
+	LuaFunctionCall(const LuaFunctionCall &) = delete;
+	LuaFunctionCall &operator=(const LuaFunctionCall &) = delete;
 
-		// optimized form of weight matrices (semi-sparse)
-		bool weightsSemiSparseCurrent;
-		std::vector<SemiSparseMatrix<WeightType>> weightsSemiSparse;
+private:
+	lua_State *m_state;
+	const char *m_name;
+	int m_numArgsPushed = 0;
+	int m_numRetsPopped = 0;
+};
+}
 
-		// these are temporary variables for evaluating the net, so we don't have to keep allocating and de-allocating
-		std::vector<NNMatrixRM> evalTmp;
-		std::vector<NNVector> evalSingleTmp;
+class ANN
+{
+public:
+	ANN(bool eigenOnly = false);
+	ANN(const std::string &networkFile);
+	ANN(const std::string &functionName, int numInputs);
 
-		// the following 2 fields are used by SGD with momentum
-		std::vector<NNVector> outputBiasLastUpdate;
-		std::vector<NNMatrix> weightsLastUpdate;
+	template <typename Derived>
+	float ForwardSingle(const Eigen::MatrixBase<Derived> &v);
 
-		// the following 4 fields are used by ADADELTA
-		std::vector<NNVector> outputBiasEg2;
-		std::vector<NNMatrix> weightsEg2;
-		std::vector<NNVector> outputBiasRMSd2;
-		std::vector<NNMatrix> weightsRMSd2;
-	} m_params;
+	template <typename Derived>
+	NNMatrixRM ForwardMultiple(const Eigen::MatrixBase<Derived> &x);
+
+	float Train(const NNMatrixRM &x, const NNMatrixRM &t);
+
+	void Load(const std::string &filename);
+	void Save(const std::string &filename);
+
+	std::string ToString() const;
+	void FromString(const std::string &s);
+
+	ANN &operator=(ANN &&other)
+	{
+		m_luaState = other.m_luaState;
+		m_inputTensorSingle = other.m_inputTensorSingle;
+		m_inputTensorMultiple = other.m_inputTensorMultiple;
+		m_trainingX = other.m_trainingX;
+		m_trainingT = other.m_trainingT;
+		m_eigenAnnUpToDate = false;
+
+		other.m_luaState = nullptr;
+		other.m_inputTensorSingle = nullptr;
+		other.m_inputTensorMultiple = nullptr;
+		other.m_trainingX = nullptr;
+		other.m_trainingT = nullptr;
+
+		return *this;
+	}
+
+	ANN(ANN &&other)
+	{
+		*this = std::move(other);
+	}
+
+	~ANN();
+
+private:
+	void Init_();
+
+	bool m_eigenOnly = false;
+	bool m_eigenAnnUpToDate = false;
+	EigenANN m_eigenAnn;
+
+	mutable lua_State *m_luaState;
+
+	THFloatTensor *m_inputTensorSingle = nullptr;
+	THFloatTensor *m_inputTensorMultiple = nullptr;
+	THFloatTensor *m_trainingX = nullptr;
+	THFloatTensor *m_trainingT = nullptr;
+
+	// This is for ToString(), which may be called from multiple threads
+	mutable std::mutex m_mutex;
 };
 
-typedef FCANN<Relu, Tanh> EvalNet;
-typedef FCANN<Relu, Logsig> MoveEvalNet;
+template <typename Derived>
+float ANN::ForwardSingle(const Eigen::MatrixBase<Derived> &v)
+{
+#if 1
+	if (!m_eigenAnnUpToDate)
+	{
+		m_eigenAnn.FromString(ToString());
+		m_eigenAnnUpToDate = true;
+	}
 
-template <typename T>
-void SerializeNet(T &net, std::ostream &s);
+	return m_eigenAnn.ForwardSingle(v);
+#else
+	if (!m_inputTensorSingle)
+	{
+		m_inputTensorSingle = THFloatTensor_newWithSize1d(v.size());
+		THFloatTensor_retain(m_inputTensorSingle);
 
-template <typename T>
-void DeserializeNet(T &net, std::istream &s);
+		LuaFunctionCall<1, 0> registerCall(m_luaState, "register_input_tensor");
+		registerCall.PushTensor(m_inputTensorSingle);
+		registerCall.Call();
+	}
 
-#include "ann_impl.h"
+	Eigen::Map<NNVector> tensorMap(THFloatTensor_data(m_inputTensorSingle), v.size());
+	tensorMap = v;
+
+	LuaFunctionCall<0, 1> forwardCall(m_luaState, "forward_single");
+	forwardCall.Call();
+	float torchOutput = forwardCall.PopNumber();
+	return torchOutput;
+#endif
+}
+
+template <typename Derived>
+NNMatrixRM ANN::ForwardMultiple(const Eigen::MatrixBase<Derived> &x)
+{
+	if (!m_inputTensorMultiple)
+	{
+		m_inputTensorMultiple = THFloatTensor_newWithSize2d(x.rows(), x.cols());
+		THFloatTensor_retain(m_inputTensorMultiple);
+
+		LuaFunctionCall<1, 0> registerCall(m_luaState, "register_input_tensor_multiple");
+		registerCall.PushTensor(m_inputTensorMultiple);
+		registerCall.Call();
+	}
+
+	Eigen::Map<NNMatrixRM> tensorMap(THFloatTensor_data(m_inputTensorMultiple), x.rows(), x.cols());
+	tensorMap = x;
+
+	LuaFunctionCall<0, 1> forwardCall(m_luaState, "forward_multiple");
+	forwardCall.Call();
+	auto tensor = forwardCall.PopTensor();
+	Eigen::Map<NNMatrixRM> returnedTensorMap(THFloatTensor_data(tensor), x.rows(), 1);
+
+	NNMatrixRM ret(returnedTensorMap);
+	return ret;
+}
 
 #endif // ANN_H

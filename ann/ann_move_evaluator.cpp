@@ -46,11 +46,7 @@ void TargetsToYNN(const std::vector<float> &trainingTargets, NNMatrixRM &yNN)
 ANNMoveEvaluator::ANNMoveEvaluator(ANNEvaluator &annEval)
 	: m_annEval(annEval)
 {
-	std::vector<FeaturesConv::FeatureDescription> fds;
-
-	FeaturesConv::GetMovesFeatureDescriptions(fds);
-
-	m_ann = AnnBuilder::BuildMoveEvalNet(fds.size(), 1);
+	m_ann = ANN("make_move_evaluator", FeaturesConv::GetMoveNumFeatures());
 }
 
 void ANNMoveEvaluator::Train(const std::vector<std::string> &positions, const std::vector<std::string> &bestMoves)
@@ -135,7 +131,7 @@ void ANNMoveEvaluator::Train(const std::vector<std::string> &positions, const st
 
 		assert(trainingSet.rows() == yNN.rows());
 
-		m_ann.TrainGDM(trainingSet, yNN, 1.0f, 0.0f);
+		m_ann.Train(trainingSet, yNN);
 	}
 }
 
@@ -222,55 +218,6 @@ void ANNMoveEvaluator::Test(const std::vector<std::string> &positions, const std
 	std::cout << "Average Confidence: " << averageConfidence << std::endl;
 }
 
-void ANNMoveEvaluator::NotifyBestMove(Board &board, SearchInfo &si, MoveInfoList &list, Move bestMove, size_t movesSearched)
-{
-	return;
-
-	// don't bother if we wouldn't have used the ANN evaluator to allocate anyways, or for QS
-	if (si.isQS || si.totalNodeBudget < MinimumNodeBudget)
-	{
-		return;
-	}
-
-	// also don't bother if this is the first move already
-	if (movesSearched <= 1)
-	{
-		return;
-	}
-
-	// convert list to a MoveList (but only for moves searched)
-	MoveList ml;
-
-	for (size_t i = 0; i < movesSearched; ++i)
-	{
-		ml.PushBack(list[i].move);
-	}
-
-	FeaturesConv::ConvertMovesInfo convInfo;
-
-	GenerateMoveConvInfo_(board, ml, convInfo);
-
-	NNMatrixRM xNN;
-
-	FeaturesConv::ConvertMovesToNN(board, convInfo, ml, xNN);
-
-	NNMatrixRM yNN(xNN.rows(), 1);
-
-	for (int64_t i = 0; i < xNN.rows(); ++i)
-	{
-		if (ml[i] == bestMove)
-		{
-			yNN(i, 0) = 1.0f;
-		}
-		else
-		{
-			yNN(i, 0) = 0.0f;
-		}
-	}
-
-	m_ann.TrainGDM(xNN, yNN, 1.0f, 0.0f);
-}
-
 void ANNMoveEvaluator::EvaluateMoves(Board &board, SearchInfo &si, MoveInfoList &list, MoveList &ml)
 {
 	if (si.isQS || si.totalNodeBudget < MinimumNodeBudget)
@@ -306,7 +253,7 @@ void ANNMoveEvaluator::EvaluateMoves(Board &board, SearchInfo &si, MoveInfoList 
 		FeaturesConv::ConvertMovesToNN(board, convInfo, ml, xNN);
 
 		entry.first = board.GetHash();
-		entry.second = m_ann.ForwardPropagateFast(xNN);
+		entry.second = m_ann.ForwardMultiple(xNN);
 
 		// scale to max 1 (NOT normalize)
 		entry.second /= entry.second.maxCoeff();
@@ -459,14 +406,14 @@ void ANNMoveEvaluator::PrintDiag(Board &b)
 	}
 }
 
-void ANNMoveEvaluator::Serialize(std::ostream &os)
+void ANNMoveEvaluator::Serialize(const std::string &filename)
 {
-	SerializeNet(m_ann, os);
+	m_ann.Save(filename);
 }
 
-void ANNMoveEvaluator::Deserialize(std::istream &is)
+void ANNMoveEvaluator::Deserialize(const std::string &filename)
 {
-	DeserializeNet(m_ann, is);
+	m_ann.Load(filename);
 }
 
 void ANNMoveEvaluator::GenerateMoveConvInfo_(Board &board, MoveList &ml, FeaturesConv::ConvertMovesInfo &convInfo)

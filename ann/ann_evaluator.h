@@ -29,8 +29,6 @@
 #include "matrix_ops.h"
 #include "consts.h"
 
-#include "ann_builder.h"
-
 //#define EVAL_HASH_STATS
 //#define LAZY_EVAL
 
@@ -41,38 +39,34 @@ public:
 	{
 		uint64_t hash;
 		Score val;
-
-		enum class EntryType
-		{
-			EXACT,
-			LOWERBOUND,
-			UPPERBOUND
-		} entryType;
 	};
 
 	const static size_t EvalHashSize = 32*MB / sizeof(EvalHashEntry);
 
-	ANNEvaluator();
+	ANNEvaluator(bool eigenOnly = false);
 
 	ANNEvaluator(const std::string &filename);
 
+	void FromString(const std::string &str)
+	{
+		m_ann.FromString(str);
+		InvalidateCache();
+	}
+
+	std::string ToString()
+	{
+		return m_ann.ToString();
+	}
+
 	void BuildANN(int64_t inputDims);
 
-	void Serialize(std::ostream &os);
+	void Serialize(const std::string &filename);
 
-	void Deserialize(std::istream &is);
+	void Deserialize(const std::string &filename);
 
-	float Train(const NNMatrixRM &pred, EvalNet::Activations &act, const NNMatrixRM &targets);
-
-	float Train(const NNMatrixRM &positions, const NNMatrixRM &targets);
-
-	// this is a special bulk evaluate for training
-	void EvaluateForWhiteMatrix(const NNMatrixRM &x, NNMatrixRM &pred, EvalNet::Activations &act);
+	float Train(const NNMatrixRM &x, const NNMatrixRM &t);
 
 	Score EvaluateForWhiteImpl(Board &b, Score lowerBound, Score upperBound) override;
-
-	// we override this function to provide faster implementation using matrix-matrix multiplications instead of matrix-vector
-	void BatchEvaluateForWhiteImpl(std::vector<Board> &positions, std::vector<Score> &results, Score lowerBound, Score upperBound) override;
 
 	void PrintDiag(Board &board) override;
 
@@ -80,13 +74,6 @@ public:
 
 private:
 	NNMatrixRM BoardsToFeatureRepresentation_(const std::vector<std::string> &positions, const std::vector<FeaturesConv::FeatureDescription> &featureDescriptions);
-
-	NNMatrixRM ComputeErrorDerivatives_(
-		const NNMatrixRM &predictions,
-		const NNMatrixRM &targets,
-		const NNMatrixRM &finalLayerActivations,
-		float positiveWeight,
-		float negativeWeight);
 
 	Optional<Score> HashProbe_(const Board &b)
 	{
@@ -102,25 +89,8 @@ private:
 
 		if (entry->hash == hash)
 		{
-			if (entry->entryType == EvalHashEntry::EntryType::EXACT)
-			{
-				ret = entry->val;
-
-#ifdef EVAL_HASH_STATS
-				++hits;
-#endif
-			}
+			ret = entry->val;
 		}
-
-#ifdef EVAL_HASH_STATS
-		++queries;
-
-		if (queries == 100000)
-		{
-			std::cout << "Queries: " << queries << std::endl;
-			std::cout << "Hits: " << hits << std::endl;
-		}
-#endif
 
 		return ret;
 	}
@@ -135,7 +105,7 @@ private:
 		entry->val = score;
 	}
 
-	EvalNet m_ann;
+	ANN m_ann;
 
 	std::vector<float> m_convTmp;
 

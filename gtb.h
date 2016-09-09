@@ -31,7 +31,7 @@
 namespace GTB
 {
 
-static const size_t CacheSize = 32*MB;
+static const size_t CacheSize = 256*MB;
 static const size_t WdlFraction = 96; // use 3/4 of the cache for WDL
 static const size_t MaxPieces = 5;
 

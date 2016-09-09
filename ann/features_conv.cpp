@@ -136,10 +136,9 @@ void PushGlobalCoords(std::vector<T> &ret, bool exists, Square sq, int32_t group
 	PushGlobalFloat(ret, exists ? NormalizeCoord(x) : 0.0f, group);
 	PushGlobalFloat(ret, exists ? NormalizeCoord(y) : 0.0f, group);
 
-#if 0
-	PushGlobalFloat(ret, exists ? NormalizeCount(GetDiag0(sq), 14) : 0.0f, group);
-	PushGlobalFloat(ret, exists ? NormalizeCount(GetDiag1(sq), 14) : 0.0f, group);
-#endif
+	// Diagonals
+	//PushGlobalFloat(ret, exists ? NormalizeCount(GetDiag0(sq), 14) : 0.0f, group);
+	//PushGlobalFloat(ret, exists ? NormalizeCount(GetDiag1(sq), 14) : 0.0f, group);
 }
 
 template <typename T> void PushMobility(
@@ -674,7 +673,7 @@ void ConvertBoardToNN(Board &board, std::vector<T> &ret)
 	++group;
 	PushPairPieces<T>(ret, board.GetPieceTypeBitboard(BN), BN, board, group, PushFCFeatures, atkMaps);
 
-	PushSquareFeatures(ret, board, atkMaps, group);
+	//PushSquareFeatures(ret, board, atkMaps, group);
 }
 
 template void ConvertBoardToNN<float>(Board &board, std::vector<float> &ret);

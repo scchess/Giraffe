@@ -108,6 +108,13 @@ void ConvertMovesToNN(
 // so we need a separate function
 void GetMovesFeatureDescriptions(std::vector<FeaturesConv::FeatureDescription> &fds);
 
+inline int64_t GetMoveNumFeatures()
+{
+	std::vector<FeaturesConv::FeatureDescription> fds;
+	GetMovesFeatureDescriptions(fds);
+	return static_cast<int64_t>(fds.size());
+}
+
 }
 
 #endif // FEATURES_CONV_H

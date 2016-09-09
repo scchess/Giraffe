@@ -3,11 +3,13 @@ CXX=g++-5
 # this is used to build gtb only
 CC=gcc-5
 
+TORCH_DIR=~/torch/install
+
 HGVERSION:= $(shell hg parents --template '{node|short}')
 
 CXXFLAGS_BASE = \
 	-Wall -Wextra -Wno-unused-function -std=gnu++11 -mtune=native -Wa,-q -ffast-math \
-	-pthread -fopenmp -DHGVERSION="\"${HGVERSION}\""
+	-pthread -fopenmp -DHGVERSION="\"${HGVERSION}\"" -I $(TORCH_DIR)/include
 
 # we will then extend this one with optimization flags
 CXXFLAGS:= $(CXXFLAGS_BASE)
@@ -15,7 +17,13 @@ CXXFLAGS:= $(CXXFLAGS_BASE)
 CXXFLAGS_DEP = \
 	-std=gnu++11
 
-LDFLAGS=-L. -Lgtb -lm -ltcmalloc -lgtb
+LDFLAGS=-L. -L $(TORCH_DIR)/lib -Lgtb -lm -lgtb
+
+# for LuaJIT
+LDFLAGS += -lluaT -lTH -lluajit
+
+#for LUA 5.2
+#LDFLAGS += -lluaT -lTH -llua
 
 ifeq ($(PG), 1)
 	CXXFLAGS += -g -Og -pg
@@ -63,6 +71,8 @@ else
 		# https://gcc.gnu.org/bugzilla/show_bug.cgi?id=47785
 		CXXFLAGS += -Wa,-q
 		CXXFLAGS := $(filter-out -flto,$(CXXFLAGS))
+		# luajit requires this on OS X
+		LDFLAGS += -pagezero_size 10000 -image_base 100000000
 	endif
 endif
 
