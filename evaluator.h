@@ -51,53 +51,6 @@ public:
 		return EvaluateForWhiteImpl(b, lowerBound, upperBound);
 	}
 
-	virtual Score EvaluateForSTMGEE(Board &board, Score lowerBound = SCORE_MIN, Score upperBound = SCORE_MAX)
-	{
-		if (board.GetSideToMove() == WHITE)
-		{
-			return EvaluateForWhiteGEEImpl(board, lowerBound, upperBound);
-		}
-		else
-		{
-			return -EvaluateForWhiteGEEImpl(board, -upperBound, -lowerBound);
-		}
-	}
-
-	virtual Score EvaluateForWhiteGEE(Board &board, Score lowerBound = SCORE_MIN, Score upperBound = SCORE_MAX)
-	{
-		return EvaluateForWhiteGEEImpl(board, lowerBound, upperBound);
-	}
-
-	virtual void BatchEvaluateForSTMGEE(std::vector<Board> &positions, std::vector<Score> &results, Score lowerBound = SCORE_MIN, Score upperBound = SCORE_MAX)
-	{
-		// check that they all have the same stm
-		Color stm = positions[0].GetSideToMove();
-
-		for (size_t i = 1; i < positions.size(); ++i)
-		{
-			assert(positions[i].GetSideToMove() == stm);
-		}
-
-		if (stm == WHITE)
-		{
-			BatchEvaluateForWhiteGEEImpl(positions, results, lowerBound, upperBound);
-		}
-		else
-		{
-			BatchEvaluateForWhiteGEEImpl(positions, results, -upperBound, -lowerBound);
-
-			for (auto &x : results)
-			{
-				x *= -1;
-			}
-		}
-	}
-
-	virtual void BatchEvaluateForWhiteGEE(std::vector<Board> &positions, std::vector<Score> &results, Score lowerBound = SCORE_MIN, Score upperBound = SCORE_MAX)
-	{
-		BatchEvaluateForWhiteGEEImpl(positions, results, lowerBound, upperBound);
-	}
-
 	virtual float UnScale(float x)
 	{
 		float ret = x / EvalFullScale;
@@ -121,41 +74,6 @@ public:
 		{
 			results[i] = EvaluateForWhiteImpl(positions[i], lowerBound, upperBound);
 		}
-	}
-
-	// evaluates the board from the perspective of the moving side by running eval on the leaf of a GEE
-	// this is a generic implementation that can be overridden
-	virtual Score EvaluateForWhiteGEEImpl(Board &board, Score lowerBound, Score upperBound)
-	{
-		Score result = 0;
-
-		auto staticEvalCallback = [this, &result, lowerBound, upperBound](Board &board)
-		{
-			result = EvaluateForWhiteImpl(board, lowerBound, upperBound);
-		};
-
-		SEE::GEERunFunc(board, staticEvalCallback);
-
-		return result;
-	}
-
-	virtual void BatchEvaluateForWhiteGEEImpl(std::vector<Board> &positions, std::vector<Score> &results, Score lowerBound, Score upperBound)
-	{
-		std::vector<Board> leafPositions;
-
-		leafPositions.reserve(positions.size());
-
-		auto vectorInsertCallback = [this, &leafPositions](Board &board)
-		{
-			leafPositions.push_back(board);
-		};
-
-		for (size_t i = 0; i < positions.size(); ++i)
-		{
-			SEE::GEERunFunc(positions[i], vectorInsertCallback);
-		}
-
-		BatchEvaluateForWhiteImpl(leafPositions, results, lowerBound, upperBound);
 	}
 
 	// this is optional

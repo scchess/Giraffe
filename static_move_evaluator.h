@@ -58,13 +58,6 @@ public:
 			si.killer->GetKillers(killerMoves, si.ply);
 		}
 
-		Move counterMove = 0;
-
-		if (si.counter)
-		{
-			counterMove = si.counter->GetCounterMove(board);
-		}
-
 		for (auto &mi : list)
 		{
 			Move mv = mi.move;
@@ -119,14 +112,10 @@ public:
 
 				assert(found);
 			}
-			else if (mv == counterMove)
-			{
-				mi.nodeAllocation = 1.05f;
-			}
 			else if (mi.seeScore >= 0 && !isUnderPromo)
 			{
 				// other non-losing moves (excluding underpomotions)
-				mi.nodeAllocation = 1.0000f + si.history->GetHistoryScore(mv) * 0.01f;
+				mi.nodeAllocation = 1.0000f + (si.history ? (si.history->GetHistoryScore(mv) * 0.01f) : 0.0f);
 			}
 			else if (isViolent && !isUnderPromo)
 			{

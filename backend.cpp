@@ -344,7 +344,6 @@ void Backend::StartSearch_(Search::SearchType searchType)
 	m_searchContext->nodeBudget = m_maxDepth == 0 ? 0 : Search::DepthToNodeBudget(m_maxDepth);
 	m_searchContext->transpositionTable = &m_tTable;
 	m_searchContext->killer = &m_killer;
-	m_searchContext->counter = &m_counter;
 	m_searchContext->history = &m_history;
 
 	m_searchContext->evaluator = m_evaluator;

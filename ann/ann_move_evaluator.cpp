@@ -170,15 +170,6 @@ void ANNMoveEvaluator::Test(const std::vector<std::string> &positions, const std
 
 		si.totalNodeBudget = 1000000000;
 
-		auto searchFunc = [this](Board &pos, Score /*lowerBound*/, Score /*upperBound*/, int64_t nodeBudget, int32_t /*ply*/) -> Score
-		{
-			Search::SearchResult result = Search::SyncSearchNodeLimited(pos, nodeBudget, &m_annEval, &gStaticMoveEvaluator);
-
-			return result.score;
-		};
-
-		si.searchFunc = searchFunc;
-
 		EvaluateMoves(board, si, list, ml);
 
 		NormalizeMoveInfoList(list);
@@ -386,15 +377,6 @@ void ANNMoveEvaluator::PrintDiag(Board &b)
 	si.isQS = false;
 
 	si.totalNodeBudget = 100000;
-
-	auto searchFunc = [this](Board &pos, Score /*lowerBound*/, Score /*upperBound*/, int64_t nodeBudget, int32_t /*ply*/) -> Score
-	{
-		Search::SearchResult result = Search::SyncSearchNodeLimited(pos, nodeBudget, &m_annEval, &gStaticMoveEvaluator);
-
-		return result.score;
-	};
-
-	si.searchFunc = searchFunc;
 
 	MoveInfoList list;
 

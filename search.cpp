@@ -30,7 +30,6 @@
 #include "eval/eval.h"
 #include "see.h"
 #include "gtb.h"
-#include "countermove.h"
 
 namespace
 {
@@ -333,20 +332,6 @@ Score Search(RootSearchContext &context, std::vector<Move> &pv, Board &board, Sc
 
 	TTEntry *tEntry = ENABLE_TT ? context.transpositionTable->Probe(board.GetHash()) : 0;
 
-	// if we are at a PV node and don't have a best move (either because we don't have an entry,
-	// or the entry doesn't have a best move)
-	// internal iterative deepening
-	if (ENABLE_IID && ENABLE_TT)
-	{
-		if (isPV && (!tEntry || tEntry->bestMove == 0) && nodeBudget > MinNodeBudgetForIID)
-		{
-			std::vector<Move> iidPv;
-			Search(context, iidPv, board, alpha, beta, nodeBudget * IIDNodeBudgetMultiplier, ply);
-
-			tEntry = context.transpositionTable->Probe(board.GetHash());
-		}
-	}
-
 	if (tEntry)
 	{
 		// try to get a cutoff from ttable, unless we are in PV (it can shorten PV)
@@ -376,32 +361,33 @@ Score Search(RootSearchContext &context, std::vector<Move> &pv, Board &board, Sc
 		}
 	}
 
-	Score staticEval = context.evaluator->EvaluateForSTM(board, alpha, beta);
-
 	// try null move
-	if (ENABLE_NULL_MOVE_HEURISTICS && staticEval >= beta && !isPV)
+	if (ENABLE_NULL_MOVE_HEURISTICS &&
+		!isPV &&
+		nodeBudget >= MinNodeBudgetForNullMove &&
+		!board.InCheck() &&
+		!board.IsZugzwangProbable() &&
+		nullMoveAllowed &&
+		context.evaluator->EvaluateForSTM(board, alpha, beta) >= beta /* This is expensive, so test it last!*/)
 	{
-		if (nodeBudget >= MinNodeBudgetForNullMove && !board.InCheck() && !board.IsZugzwangProbable() && nullMoveAllowed)
+		board.MakeNullMove();
+
+		std::vector<Move> pvNN;
+
+		NodeBudget nmNodeBudget = nodeBudget * NullMoveNodeBudgetMultiplier;
+
+		Score nmScore = -Search(context, pvNN, board, -beta, -beta + 1, nmNodeBudget, ply + 1, false);
+
+		board.UndoMove();
+
+		if (nmScore >= beta)
 		{
-			board.MakeNullMove();
-
-			std::vector<Move> pvNN;
-
-			NodeBudget nmNodeBudget = nodeBudget * NullMoveNodeBudgetMultiplier;
-
-			Score nmScore = -Search(context, pvNN, board, -beta, -beta + 1, nmNodeBudget, ply + 1, false);
-
-			board.UndoMove();
-
-			if (nmScore >= beta)
+			if (ENABLE_TT)
 			{
-				if (ENABLE_TT)
-				{
-					context.transpositionTable->Store(board, 0, nmScore, originalNodeBudget, LOWERBOUND);
-				}
-
-				return beta;
+				context.transpositionTable->Store(board, 0, nmScore, originalNodeBudget, LOWERBOUND);
 			}
+
+			return beta;
 		}
 	}
 
@@ -419,11 +405,6 @@ Score Search(RootSearchContext &context, std::vector<Move> &pv, Board &board, Sc
 		si.killer = context.killer;
 	}
 
-	if (ENABLE_COUNTERMOVES)
-	{
-		si.counter = context.counter;
-	}
-
 	if (ENABLE_HISTORY)
 	{
 		si.history = context.history;
@@ -436,14 +417,6 @@ Score Search(RootSearchContext &context, std::vector<Move> &pv, Board &board, Sc
 
 	si.lowerBound = alpha;
 	si.upperBound = beta;
-
-	auto searchFunc = [&context](Board &pos, Score lowerBound, Score upperBound, int64_t nodeBudget, int32_t ply) -> Score
-	{
-		std::vector<Move> pv;
-		return Search(context, pv, pos, lowerBound, upperBound, nodeBudget, ply, true);
-	};
-
-	si.searchFunc = searchFunc;
 
 	context.moveEvaluator->GenerateAndEvaluateMoves(board, si, miList);
 
@@ -548,11 +521,6 @@ Score Search(RootSearchContext &context, std::vector<Move> &pv, Board &board, Sc
 				if (ENABLE_KILLERS)
 				{
 					context.killer->Notify(ply, mv);
-				}
-
-				if (ENABLE_COUNTERMOVES)
-				{
-					context.counter->Notify(board, mv);
 				}
 
 				if (ENABLE_HISTORY)
@@ -692,11 +660,6 @@ Score QSearch(RootSearchContext &context, std::vector<Move> &pv, Board &board, S
 		si.killer = context.killer;
 	}
 
-	if (ENABLE_COUNTERMOVES)
-	{
-		si.counter = context.counter;
-	}
-
 	if (ENABLE_HISTORY)
 	{
 		si.history = context.history;
@@ -755,7 +718,7 @@ Score QSearch(RootSearchContext &context, std::vector<Move> &pv, Board &board, S
 	return alpha;
 }
 
-SearchResult SyncSearchNodeLimited(const Board &b, NodeBudget nodeBudget, EvaluatorIface *evaluator, MoveEvaluatorIface *moveEvaluator, Killer *killer, TTable *ttable, CounterMove *counter, History *history)
+SearchResult SyncSearchNodeLimited(const Board &b, NodeBudget nodeBudget, EvaluatorIface *evaluator, MoveEvaluatorIface *moveEvaluator, Killer *killer, TTable *ttable, History *history)
 {
 	SearchResult ret;
 	RootSearchContext context;
@@ -764,7 +727,6 @@ SearchResult SyncSearchNodeLimited(const Board &b, NodeBudget nodeBudget, Evalua
 
 	std::unique_ptr<Killer> killer_u;
 	std::unique_ptr<TTable> ttable_u;
-	std::unique_ptr<CounterMove> counter_u;
 	std::unique_ptr<History> history_u;
 
 	if (killer == nullptr)
@@ -785,16 +747,6 @@ SearchResult SyncSearchNodeLimited(const Board &b, NodeBudget nodeBudget, Evalua
 	else
 	{
 		context.transpositionTable = ttable;
-	}
-
-	if (counter == nullptr)
-	{
-		counter_u.reset(new CounterMove);
-		context.counter = counter_u.get();
-	}
-	else
-	{
-		context.counter = counter;
 	}
 
 	if (history == nullptr)
