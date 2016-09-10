@@ -37,7 +37,6 @@
 #include "search.h"
 #include "ttable.h"
 #include "killer.h"
-#include "countermove.h"
 #include "random_device.h"
 #include "ann/ann_evaluator.h"
 #include "move_evaluator.h"
@@ -215,7 +214,6 @@ void TDL(const std::string &positionsFilename)
 			{
 				Killer killer;
 				TTable ttable(1*MB); // we want the ttable to fit in L3
-				CounterMove counter;
 				History history;
 
 				auto rng = gRd.MakeMT();
@@ -263,7 +261,7 @@ void TDL(const std::string &positionsFilename)
 					// make a few moves, and store the leaves of each move into trainingBatch
 					for (int64_t moveNum = 0; moveNum < HalfMovesToMake; ++moveNum)
 					{
-						Search::SearchResult result = Search::SyncSearchNodeLimited(pos, SearchNodeBudget, &annEvalThread, &gStaticMoveEvaluator, &killer, &ttable, &counter, &history);
+						Search::SearchResult result = Search::SyncSearchNodeLimited(pos, SearchNodeBudget, &annEvalThread, &gStaticMoveEvaluator, &killer, &ttable, &history);
 
 						Board leaf = pos;
 						leaf.ApplyVariation(result.pv);
