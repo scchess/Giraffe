@@ -26,7 +26,7 @@ LDFLAGS += -lluaT -lTH -lluajit
 #LDFLAGS += -lluaT -lTH -llua
 
 ifeq ($(PG), 1)
-	CXXFLAGS += -g -Og -pg
+	CXXFLAGS += -g -Os -pg
 else ifeq ($(DEBUG),1)
 	CXXFLAGS += -g -Og
 else
