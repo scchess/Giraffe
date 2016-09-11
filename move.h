@@ -55,6 +55,8 @@ namespace MoveConstants
 	const static uint32_t CASTLE_MASK = CASTLE_WHITE_LONG | CASTLE_WHITE_SHORT | CASTLE_BLACK_LONG | CASTLE_BLACK_SHORT;
 }
 
+const static Move NULL_MOVE = 0xffffffff;
+
 inline PieceType GetPieceType(Move mv)
 {
 	return (mv >> MoveConstants::PIECE_TYPE_SHIFT) & MoveConstants::PIECE_TYPE_MASK;
