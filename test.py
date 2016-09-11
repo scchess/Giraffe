@@ -2,7 +2,7 @@ import os
 import shutil
 import subprocess
 
-os.environ["OMP_NUM_THREADS"] = "16"
+os.environ["OMP_NUM_THREADS"] = "14"
 
 def getLastIterationDone(filename):
 	if not os.path.isfile(filename):
