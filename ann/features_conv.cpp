@@ -137,8 +137,8 @@ void PushGlobalCoords(std::vector<T> &ret, bool exists, Square sq, int32_t group
 	PushGlobalFloat(ret, exists ? NormalizeCoord(y) : 0.0f, group);
 
 	// Diagonals
-	//PushGlobalFloat(ret, exists ? NormalizeCount(GetDiag0(sq), 14) : 0.0f, group);
-	//PushGlobalFloat(ret, exists ? NormalizeCount(GetDiag1(sq), 14) : 0.0f, group);
+	// PushGlobalFloat(ret, exists ? NormalizeCount(GetDiag0(sq), 14) : 0.0f, group);
+	// PushGlobalFloat(ret, exists ? NormalizeCount(GetDiag1(sq), 14) : 0.0f, group);
 }
 
 template <typename T> void PushMobility(
@@ -284,32 +284,20 @@ void PushAttacks(std::vector<T> &ret, Square sq, PieceType pt, bool exists, cons
 }
 
 template <typename T>
-void PushSquareFeatures(std::vector<T> &ret, const Board &/*board*/, AttackMaps &atkMaps, int &group)
+void PushSquareFeatures(std::vector<T> &ret, const Board &board, AttackMaps &atkMaps, int &group)
 {
 	for (Square sq = 0; sq < 64; ++sq)
 	{
-		PushPosFloat(ret, sq, atkMaps.whiteCtrl[sq], group);
-		PushPosFloat(ret, sq, atkMaps.blackCtrl[sq], group + 1);
-
-		/*
-		PieceType pt = board.GetPieceAtSquare(sq);
-
-		if (pt == EMPTY)
+		if (board.GetSideToMove() == WHITE)
 		{
-			PushPosFloat(ret, sq, 0.0f, group + 2);
-			PushPosFloat(ret, sq, 0.0f, group + 3);
+			PushPosFloat(ret, sq, atkMaps.whiteCtrl[sq], group);
+			PushPosFloat(ret, sq, atkMaps.blackCtrl[sq], group + 1);
 		}
-		else if (GetColor(pt) == WHITE)
+		else
 		{
-			PushPosFloat(ret, sq, NormalizeCount(SEE::SEE_MAT[board.GetPieceAtSquare(sq)], SEE::SEE_MAT[WK]), group + 2);
-			PushPosFloat(ret, sq, 0.0f, group + 3);
+			PushPosFloat(ret, sq, atkMaps.blackCtrl[sq], group);
+			PushPosFloat(ret, sq, atkMaps.whiteCtrl[sq], group + 1);
 		}
-		else if (GetColor(pt) == BLACK)
-		{
-			PushPosFloat(ret, sq, 0.0f, group + 2);
-			PushPosFloat(ret, sq, NormalizeCount(SEE::SEE_MAT[board.GetPieceAtSquare(sq)], SEE::SEE_MAT[WK]), group + 3);
-		}
-		*/
 	}
 
 	group += 2;
@@ -559,43 +547,46 @@ void ConvertBoardToNN(Board &board, std::vector<T> &ret)
 {
 	ret.clear(); // this shouldn't actually deallocate memory
 
+	Color movingSide = board.GetSideToMove();
+	Color oppoSide = movingSide ^ COLOR_MASK;
+
 	// we start by computing values that will be used later
-	size_t WQCount = board.GetPieceCount(WQ);
-	size_t WRCount = board.GetPieceCount(WR);
-	size_t WBCount = board.GetPieceCount(WB);
-	size_t WNCount = board.GetPieceCount(WN);
-	size_t WPCount = board.GetPieceCount(WP);
+	size_t MQCount = board.GetPieceCount(Q | movingSide);
+	size_t MRCount = board.GetPieceCount(R | movingSide);
+	size_t MBCount = board.GetPieceCount(B | movingSide);
+	size_t MNCount = board.GetPieceCount(N | movingSide);
+	size_t MPCount = board.GetPieceCount(P | movingSide);
 
-	size_t BQCount = board.GetPieceCount(BQ);
-	size_t BRCount = board.GetPieceCount(BR);
-	size_t BBCount = board.GetPieceCount(BB);
-	size_t BNCount = board.GetPieceCount(BN);
-	size_t BPCount = board.GetPieceCount(BP);
+	size_t OQCount = board.GetPieceCount(Q | oppoSide);
+	size_t ORCount = board.GetPieceCount(R | oppoSide);
+	size_t OBCount = board.GetPieceCount(B | oppoSide);
+	size_t ONCount = board.GetPieceCount(N | oppoSide);
+	size_t OPCount = board.GetPieceCount(P | oppoSide);
 
-	float WMatNP =
-		SEE::SEE_MAT[WQ] * WQCount +
-		SEE::SEE_MAT[WR] * WRCount +
-		SEE::SEE_MAT[WB] * WBCount +
-		SEE::SEE_MAT[WN] * WNCount;
+	float MMatNP =
+		SEE::SEE_MAT[Q] * MQCount +
+		SEE::SEE_MAT[R] * MRCount +
+		SEE::SEE_MAT[B] * MBCount +
+		SEE::SEE_MAT[N] * MNCount;
 
-	float BMatNP =
-		SEE::SEE_MAT[BQ] * BQCount +
-		SEE::SEE_MAT[BR] * BRCount +
-		SEE::SEE_MAT[BB] * BBCount +
-		SEE::SEE_MAT[BN] * BNCount;
+	float OMatNP =
+		SEE::SEE_MAT[Q] * OQCount +
+		SEE::SEE_MAT[R] * ORCount +
+		SEE::SEE_MAT[N] * OBCount +
+		SEE::SEE_MAT[B] * ONCount;
 
-	float WMatP = SEE::SEE_MAT[WP] * WPCount;
-	float BMatP = SEE::SEE_MAT[BP] * BPCount;
+	float MMatP = SEE::SEE_MAT[P] * MPCount;
+	float OMatP = SEE::SEE_MAT[P] * OPCount;
 
-	int64_t MaxTotalMatNP = SEE::SEE_MAT[WQ] + 2 * SEE::SEE_MAT[WR] + 2 * SEE::SEE_MAT[WB] + 2 * SEE::SEE_MAT[WN];
-	int64_t MaxTotalMatP = 8 * SEE::SEE_MAT[WP];
+	int64_t MaxTotalMatNP = SEE::SEE_MAT[Q] + 2 * SEE::SEE_MAT[R] + 2 * SEE::SEE_MAT[B] + 2 * SEE::SEE_MAT[N];
+	int64_t MaxTotalMatP = 8 * SEE::SEE_MAT[P];
 
-	WMatNP = NormalizeCount(static_cast<int64_t>(WMatNP), MaxTotalMatNP);
-	BMatNP = NormalizeCount(static_cast<int64_t>(BMatNP), MaxTotalMatNP);
-	WMatP = NormalizeCount(static_cast<int64_t>(WMatP), MaxTotalMatP);
-	BMatP = NormalizeCount(static_cast<int64_t>(BMatP), MaxTotalMatP);
+	MMatNP = NormalizeCount(static_cast<int64_t>(MMatNP), MaxTotalMatNP);
+	OMatNP = NormalizeCount(static_cast<int64_t>(OMatNP), MaxTotalMatNP);
+	MMatP = NormalizeCount(static_cast<int64_t>(MMatP), MaxTotalMatP);
+	OMatP = NormalizeCount(static_cast<int64_t>(OMatP), MaxTotalMatP);
 
-	float totalMat = NormalizeCount(static_cast<int64_t>(WMatNP + BMatNP + WMatP + BMatP), MaxTotalMatNP * 2 + MaxTotalMatP * 2);
+	float totalMat = NormalizeCount(static_cast<int64_t>(MMatNP + OMatNP + MMatP + OMatP), MaxTotalMatNP * 2 + MaxTotalMatP * 2);
 
 	// this function pushes important features that should go into all groups (currently empty)
 	auto PushFCFeatures = [totalMat](std::vector<T> &/*ret*/, int32_t /*group*/)
@@ -604,6 +595,8 @@ void ConvertBoardToNN(Board &board, std::vector<T> &ret)
 	};
 
 	AttackMaps atkMaps = ComputeAttackMaps(board);
+	//Board::MoveCountMap moveCountMap;
+	//board.ComputeMoveCountMap(moveCountMap);
 
 	// now we can start actually forming the groups
 	int32_t group = 0;
@@ -613,66 +606,93 @@ void ConvertBoardToNN(Board &board, std::vector<T> &ret)
 	// these can also be calculated from "pieces exist" flags, they are
 	// almost entirely redundant (except for set-up illegal positions, and promotions)
 	// in evaluator, they are passed directly to second layer, because they are very important (game phase information)
-	PushGlobalFloat(ret, NormalizeCount(WQCount, 1.0f), group);
-	PushGlobalFloat(ret, NormalizeCount(WRCount, 2.0f), group);
-	PushGlobalFloat(ret, NormalizeCount(WBCount, 2.0f), group);
-	PushGlobalFloat(ret, NormalizeCount(WNCount, 2.0f), group);
-	PushGlobalFloat(ret, NormalizeCount(WPCount, 8.0f), group);
-	PushGlobalFloat(ret, NormalizeCount(BQCount, 1.0f), group);
-	PushGlobalFloat(ret, NormalizeCount(BRCount, 2.0f), group);
-	PushGlobalFloat(ret, NormalizeCount(BBCount, 2.0f), group);
-	PushGlobalFloat(ret, NormalizeCount(BNCount, 2.0f), group);
-	PushGlobalFloat(ret, NormalizeCount(BPCount, 8.0f), group);
+	PushGlobalFloat(ret, NormalizeCount(MQCount, 1.0f), group);
+	PushGlobalFloat(ret, NormalizeCount(MRCount, 2.0f), group);
+	PushGlobalFloat(ret, NormalizeCount(MBCount, 2.0f), group);
+	PushGlobalFloat(ret, NormalizeCount(MNCount, 2.0f), group);
+	PushGlobalFloat(ret, NormalizeCount(MPCount, 8.0f), group);
+	PushGlobalFloat(ret, NormalizeCount(OQCount, 1.0f), group);
+	PushGlobalFloat(ret, NormalizeCount(ORCount, 2.0f), group);
+	PushGlobalFloat(ret, NormalizeCount(OBCount, 2.0f), group);
+	PushGlobalFloat(ret, NormalizeCount(ONCount, 2.0f), group);
+	PushGlobalFloat(ret, NormalizeCount(OPCount, 8.0f), group);
+	PushGlobalFloat(ret, MMatNP, group);
+	PushGlobalFloat(ret, OMatNP, group);
+	PushGlobalFloat(ret, MMatP, group);
+	PushGlobalFloat(ret, OMatP, group);
 
 	// which side to move
-	PushGlobalBool(ret, board.GetSideToMove() == WHITE, group);
+	PushGlobalBool(ret, movingSide == WHITE, group);
+
+	// are we in check?
+	PushGlobalBool(ret, board.InCheck(), group);
 
 	// king positions
-	uint32_t wkPos = board.GetFirstPiecePos(WK);
-	uint32_t bkPos = board.GetFirstPiecePos(BK);
+	uint32_t mkPos = board.GetFirstPiecePos(K | movingSide);
+	uint32_t okPos = board.GetFirstPiecePos(K | oppoSide);
 
-	PushGlobalCoords(ret, true, wkPos, group, true);
-	PushGlobalBool(ret, board.HasCastlingRight(W_SHORT_CASTLE), group);
-	PushGlobalBool(ret, board.HasCastlingRight(W_LONG_CASTLE), group);
+	PushGlobalCoords(ret, true, mkPos, group, true);
+	PushGlobalCoords(ret, true, okPos, group, true);
 
-	PushGlobalCoords(ret, true, bkPos, group, true);
-	PushGlobalBool(ret, board.HasCastlingRight(B_SHORT_CASTLE), group);
-	PushGlobalBool(ret, board.HasCastlingRight(B_LONG_CASTLE), group);
+	if (movingSide == WHITE)
+	{
+		PushGlobalBool(ret, board.HasCastlingRight(W_SHORT_CASTLE), group);
+		PushGlobalBool(ret, board.HasCastlingRight(W_LONG_CASTLE), group);
+		PushGlobalBool(ret, board.HasCastlingRight(B_SHORT_CASTLE), group);
+		PushGlobalBool(ret, board.HasCastlingRight(B_LONG_CASTLE), group);
+	}
+	else
+	{
+		PushGlobalBool(ret, board.HasCastlingRight(B_SHORT_CASTLE), group);
+		PushGlobalBool(ret, board.HasCastlingRight(B_LONG_CASTLE), group);
+		PushGlobalBool(ret, board.HasCastlingRight(W_SHORT_CASTLE), group);
+		PushGlobalBool(ret, board.HasCastlingRight(W_LONG_CASTLE), group);
+	}
 
 	// pawns (all pawns are in the same group)
 	++group;
-	PushPawns<WHITE>(ret, board.GetPieceTypeBitboard(WP), atkMaps, group);
-	PushPawns<BLACK>(ret, board.GetPieceTypeBitboard(BP), atkMaps, group);
+
+	if (movingSide == WHITE)
+	{
+		PushPawns<WHITE>(ret, board.GetPieceTypeBitboard(WP), atkMaps, group);
+		PushPawns<BLACK>(ret, board.GetPieceTypeBitboard(BP), atkMaps, group);
+	}
+	else
+	{
+		PushPawns<BLACK>(ret, board.GetPieceTypeBitboard(BP), atkMaps, group);
+		PushPawns<WHITE>(ret, board.GetPieceTypeBitboard(WP), atkMaps, group);
+	}
 	PushFCFeatures(ret, group);
 
 	// queens
 	++group;
-	PushQueens<T>(ret, board.GetPieceTypeBitboard(WQ), WQ, board, group, PushFCFeatures, atkMaps);
+	PushQueens<T>(ret, board.GetPieceTypeBitboard(Q | movingSide), Q | movingSide, board, group, PushFCFeatures, atkMaps);
 	++group;
-	PushQueens<T>(ret, board.GetPieceTypeBitboard(BQ), BQ, board, group, PushFCFeatures, atkMaps);
+	PushQueens<T>(ret, board.GetPieceTypeBitboard(Q | oppoSide), Q | oppoSide, board, group, PushFCFeatures, atkMaps);
 
 	// rooks
 	++group;
-	PushPairPieces<T>(ret, board.GetPieceTypeBitboard(WR), WR, board, group, PushFCFeatures, atkMaps);
-	PushGlobalBool(ret, board.HasCastlingRight(W_SHORT_CASTLE), group);
-	PushGlobalBool(ret, board.HasCastlingRight(W_LONG_CASTLE), group);
+	PushPairPieces<T>(ret, board.GetPieceTypeBitboard(R | movingSide), R | movingSide, board, group, PushFCFeatures, atkMaps);
+	PushGlobalBool(ret, board.HasCastlingRight(movingSide == WHITE ? W_SHORT_CASTLE : B_SHORT_CASTLE), group);
+	PushGlobalBool(ret, board.HasCastlingRight(movingSide == WHITE ? W_LONG_CASTLE : B_LONG_CASTLE), group);
 	++group;
-	PushPairPieces<T>(ret, board.GetPieceTypeBitboard(BR), BR, board, group, PushFCFeatures, atkMaps);
-	PushGlobalBool(ret, board.HasCastlingRight(B_SHORT_CASTLE), group);
-	PushGlobalBool(ret, board.HasCastlingRight(B_LONG_CASTLE), group);
+	PushPairPieces<T>(ret, board.GetPieceTypeBitboard(R | oppoSide), R | oppoSide, board, group, PushFCFeatures, atkMaps);
+	PushGlobalBool(ret, board.HasCastlingRight(oppoSide == WHITE ? W_SHORT_CASTLE : B_SHORT_CASTLE), group);
+	PushGlobalBool(ret, board.HasCastlingRight(oppoSide == WHITE ? W_LONG_CASTLE : B_LONG_CASTLE), group);
 
 	// bishops
 	++group;
-	PushPairPieces<T>(ret, board.GetPieceTypeBitboard(WB), WB, board, group, PushFCFeatures, atkMaps);
+	PushPairPieces<T>(ret, board.GetPieceTypeBitboard(B | movingSide), B | movingSide, board, group, PushFCFeatures, atkMaps);
 	++group;
-	PushPairPieces<T>(ret, board.GetPieceTypeBitboard(BB), BB, board, group, PushFCFeatures, atkMaps);
+	PushPairPieces<T>(ret, board.GetPieceTypeBitboard(B | oppoSide), B | oppoSide, board, group, PushFCFeatures, atkMaps);
 
 	// knights
 	++group;
-	PushPairPieces<T>(ret, board.GetPieceTypeBitboard(WN), WN, board, group, PushFCFeatures, atkMaps);
+	PushPairPieces<T>(ret, board.GetPieceTypeBitboard(N | movingSide), N | movingSide, board, group, PushFCFeatures, atkMaps);
 	++group;
-	PushPairPieces<T>(ret, board.GetPieceTypeBitboard(BN), BN, board, group, PushFCFeatures, atkMaps);
+	PushPairPieces<T>(ret, board.GetPieceTypeBitboard(N | oppoSide), N | oppoSide, board, group, PushFCFeatures, atkMaps);
 
+	//++group;
 	//PushSquareFeatures(ret, board, atkMaps, group);
 }
 

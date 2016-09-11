@@ -58,7 +58,7 @@ float ANNEvaluator::Train(const NNMatrixRM &x, const NNMatrixRM &t)
 	return m_ann.Train(x, t);
 }
 
-Score ANNEvaluator::EvaluateForWhiteImpl(Board &b, Score /*lowerBound*/, Score /*upperBound*/)
+Score ANNEvaluator::EvaluateForSTM(Board &b, Score /*lowerBound*/, Score /*upperBound*/)
 {
 	auto hashResult = HashProbe_(b);
 
@@ -79,6 +79,18 @@ Score ANNEvaluator::EvaluateForWhiteImpl(Board &b, Score /*lowerBound*/, Score /
 	HashStore_(b, nnRet);
 
 	return nnRet;
+}
+
+Score ANNEvaluator::EvaluateForWhiteImpl(Board &b, Score lowerBound, Score upperBound)
+{
+	if (b.GetSideToMove() == WHITE)
+	{
+		return EvaluateForSTM(b, lowerBound, upperBound);
+	}
+	else
+	{
+		return -EvaluateForSTM(b, -upperBound, -lowerBound);
+	}
 }
 
 void ANNEvaluator::PrintDiag(Board &board)

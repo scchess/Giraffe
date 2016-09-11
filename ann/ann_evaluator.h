@@ -64,7 +64,10 @@ public:
 
 	void Deserialize(const std::string &filename);
 
+	// Targets should be in STM
 	float Train(const NNMatrixRM &x, const NNMatrixRM &t);
+
+	Score EvaluateForSTM(Board &b, Score lowerBound = SCORE_MIN, Score upperBound = SCORE_MAX) override;
 
 	Score EvaluateForWhiteImpl(Board &b, Score lowerBound, Score upperBound) override;
 

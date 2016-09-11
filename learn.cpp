@@ -175,7 +175,7 @@ void TDL(const std::string &positionsFilename)
 				do
 				{
 					b = rootPositions[positionDrawFunc()];
-					val = Eval::gStaticEvaluator.EvaluateForWhite(b, SCORE_MIN, SCORE_MAX);
+					val = Eval::gStaticEvaluator.EvaluateForSTM(b, SCORE_MIN, SCORE_MAX);
 				} while (val == 0);
 
 				FeaturesConv::ConvertBoardToNN(b, features);
@@ -229,7 +229,8 @@ void TDL(const std::string &positionsFilename)
 				std::vector<std::string> threadPositions;
 				std::vector<float> threadTargets;
 
-				std::vector<std::pair<std::string, float>> playout;
+				// FEN, search score (from white), leaf color
+				std::vector<std::tuple<std::string, float, Color>> playout;
 
 				#pragma omp for schedule(dynamic, 64)
 				for (int64_t rootPosNum = 0; rootPosNum < numRootPositions; ++rootPosNum)
@@ -266,9 +267,9 @@ void TDL(const std::string &positionsFilename)
 						Board leaf = pos;
 						leaf.ApplyVariation(result.pv);
 
-						Score rootScoreWhite = result.score * (pos.GetSideToMove() == WHITE ? 1 : -1);
+						auto whiteScore = result.score * (pos.GetSideToMove() == WHITE ? 1 : -1);
 
-						playout.push_back(std::make_pair(leaf.GetFen(), annEvalThread.UnScale(rootScoreWhite)));
+						playout.push_back(std::make_tuple(leaf.GetFen(), annEvalThread.UnScale(whiteScore), leaf.GetSideToMove()));
 
 						pos.ApplyMove(result.pv[0]);
 						killer.MoveMade();
@@ -283,18 +284,18 @@ void TDL(const std::string &positionsFilename)
 
 					for (size_t i = 0; i < playout.size(); ++i)
 					{
-						float target = playout[i].second;
+						float target = std::get<1>(playout[i]);
 						float diffWeight = TDLambda;
 
 						for (size_t j = i + 1; j < playout.size(); ++j)
 						{
-							float scoreDiff = playout[j].second - playout[j - 1].second;
+							float scoreDiff = std::get<1>(playout[j]) - std::get<1>(playout[j - 1]);
 							target += scoreDiff * diffWeight;
 							diffWeight *= TDLambda;
 						}
 
-						threadPositions.push_back(playout[i].first);
-						threadTargets.push_back(target);
+						threadPositions.push_back(std::get<0>(playout[i]));
+						threadTargets.push_back(target * (std::get<2>(playout[i]) == WHITE ? 1.0f : -1.0f));
 					}
 				}
 
