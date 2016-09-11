@@ -874,7 +874,7 @@ bool Board::ApplyMove(Move mv)
 #undef REMOVE_PIECE
 }
 
-Board::CheckInfo Board::ComputeCheckInfo()
+Board::CheckInfo Board::ComputeCheckInfo() const
 {
 	CheckInfo ret;
 
@@ -1040,7 +1040,7 @@ void Board::UndoMove()
 	m_moveStack.Pop();
 }
 
-std::string Board::MoveToAlg(Move mv) const
+std::string Board::MoveToAlg(Move mv, MoveFormat mf)
 {
 	if (mv == NULL_MOVE)
 	{
@@ -1051,17 +1051,184 @@ std::string Board::MoveToAlg(Move mv) const
 	Square to = GetToSquare(mv);
 	PieceType promo = GetPromoType(mv);
 
-	std::string ret;
-
-	ret += SquareToString(from);
-	ret += SquareToString(to);
-
-	if (promo != 0)
+	if (mf == ALGEBRAIC)
 	{
-		ret += static_cast<char>(tolower(PieceTypeToChar(promo)));
-	}
+		std::string ret;
 
-	return ret;
+		ret += SquareToString(from);
+		ret += SquareToString(to);
+
+		if (promo != 0)
+		{
+			ret += static_cast<char>(tolower(PieceTypeToChar(promo)));
+		}
+
+		return ret;
+	}
+	else if (mf == SAN)
+	{
+		PieceType pt = GetPieceType(mv);
+		Square from = GetFromSquare(mv);
+		Square to = GetToSquare(mv);
+
+		if ((pt == WK && from == E1 && to == G1) || (pt == BK && from == E8 && to == G8))
+		{
+			return "O-O";
+		}
+
+		if ((pt == WK && from == E1 && to == C1) || (pt == BK && from == E8 && to == C8))
+		{
+			return "O-O-O";
+		}
+
+		std::string ret;
+
+		switch (StripColor(pt))
+		{
+		case P:
+			// no need for prefix
+			break;
+		case N:
+			ret += 'N';
+			break;
+		case B:
+			ret += 'B';
+			break;
+		case R:
+			ret += 'R';
+			break;
+		case Q:
+			ret += 'Q';
+			break;
+		case K:
+			ret += 'K';
+			break;
+		}
+
+		bool isCapture = (GetPieceAtSquare(to) != EMPTY) || (StripColor(pt) == P && IsEpAvailable() && to == GetEpSquare());
+		bool isPromotion = StripColor(pt) == P && (GetY(to) == 7 || GetY(to) == 0);
+
+		bool needX = false;
+		bool needY = false;
+		bool needEither = false;
+
+		if (StripColor(pt) == P && isCapture)
+		{
+			// pawn captures always require source file
+			needX = true;
+		}
+
+		MoveList allMoves;
+		GenerateAllLegalMoves<ALL>(allMoves);
+
+		for (const auto &possibleMove : allMoves)
+		{
+			if (GetToSquare(possibleMove) != to || GetPieceType(possibleMove) != pt || GetFromSquare(possibleMove) == from)
+			{
+				continue;
+			}
+			else
+			{
+				// we have another piece that can move to the same square
+				if (GetX(GetFromSquare(possibleMove)) != GetX(from) && GetY(GetFromSquare(possibleMove)) != GetY(from))
+				{
+					// if this can be resolved using either file or rank, we make a note that we need one of the two
+					// we cannot just choose to use file here, because it's possible that another disambiguation for this
+					// move requires rank, in which case we don't need to add file
+					needEither = true;
+				}
+				else if (GetX(GetFromSquare(possibleMove)) != GetX(from))
+				{
+					needX = true;
+				}
+				else if (GetY(GetFromSquare(possibleMove)) != GetY(from))
+				{
+					needY = true;
+				}
+				else
+				{
+					assert(false);
+				}
+			}
+		}
+
+		if (needEither && !needX && !needY)
+		{
+			// if we can pick, use file
+			needX = true;
+		}
+
+		if (needX)
+		{
+			ret += 'a' + GetX(from);
+		}
+
+		if (needY)
+		{
+			ret += '1' + GetY(from);
+		}
+
+		if (isCapture)
+		{
+			ret += 'x';
+		}
+
+		ret += SquareToString(to);
+
+		if (isPromotion)
+		{
+			switch (GetPromoType(mv))
+			{
+			case WQ:
+			case BQ:
+				ret += "=Q";
+				break;
+			case WR:
+			case BR:
+				ret += "=R";
+				break;
+			case WB:
+			case BB:
+				ret += "=B";
+				break;
+			case WN:
+			case BN:
+				ret += "=N";
+				break;
+			default:
+				assert(false);
+			}
+		}
+
+		ApplyMove(mv);
+		bool isChecking = InCheck();
+		bool isCheckmating = false;
+		if (isChecking)
+		{
+			MoveList ml;
+			GenerateAllLegalMoves<ALL>(ml);
+			if (ml.GetSize() == 0)
+			{
+				isCheckmating = true;
+			}
+		}
+		UndoMove();
+
+		if (isCheckmating)
+		{
+			ret += '#';
+		}
+		else if (isChecking)
+		{
+			ret += '+';
+		}
+
+		return ret;
+	}
+	else
+	{
+		assert(false);
+	}
 }
 
 std::string Board::PVToStr(std::vector<Move> &pv) const
@@ -1070,7 +1237,7 @@ std::string Board::PVToStr(std::vector<Move> &pv) const
 	std::string ret;
 	for (const auto &move : pv)
 	{
-		ret += boardCopy.MoveToAlg(move);
+		ret += boardCopy.MoveToAlg(move, SAN);
 		ret += ' ';
 		boardCopy.ApplyMove(move);
 	}
