@@ -18,6 +18,7 @@
 #ifndef BOARD_H
 #define BOARD_H
 
+#include <array>
 #include <functional>
 #include <string>
 #include <sstream>
@@ -118,6 +119,8 @@ public:
 		}
 	};
 
+	using MoveCountMap = std::array<size_t, 64>;
+
 	typedef FixedVector<std::pair<uint8_t, uint64_t>, 7> UndoListBB; // list of bitboards to revert on undo
 	// 6 maximum bitboards (black occupied, white occupied, source piece type, captured piece type, promotion/castling piece type, en passant, hash)
 
@@ -162,6 +165,8 @@ public:
 	void UndoMove();
 
 	std::string MoveToAlg(Move mv) const;
+
+	std::string PVToStr(std::vector<Move> &pv) const;
 
 	bool operator==(const Board &other);
 
@@ -263,6 +268,21 @@ public:
 	// get the least valuable attacker
 	// all piece types are white
 	void ComputeLeastValuableAttackers(PieceType attackers[64], uint8_t numAttackers[64], Color side);
+
+	void ComputeMoveCountMap(MoveCountMap &m)
+	{
+		for (auto &x : m)
+		{
+			x = 0;
+		}
+
+		MoveList ml;
+		GenerateAllLegalMoves<ALL>(ml);
+		for (const auto &move : ml)
+		{
+			++m[GetFromSquare(move)];
+		}
+	}
 
 	// 0 = last move, 1 = last move - 1, etc
 	Optional<Move> GetMoveFromLast(int32_t n);
