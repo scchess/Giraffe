@@ -82,6 +82,12 @@ public:
 		ONGOING
 	};
 
+	enum MoveFormat
+	{
+		ALGEBRAIC,
+		SAN
+	};
+
 	struct CheckInfo
 	{
 		// this struct contains things that can be precomputed once per position, and makes checking all the moves easier
@@ -156,7 +162,7 @@ public:
 	// returns whether the move is legal (if not, the move is reverted)
 	bool ApplyMove(Move mv);
 
-	CheckInfo ComputeCheckInfo();
+	CheckInfo ComputeCheckInfo() const;
 
 	// same as ApplyMove, but doesn't apply the move
 	// it also uses a few shortcuts to do the check faster
@@ -164,7 +170,7 @@ public:
 
 	void UndoMove();
 
-	std::string MoveToAlg(Move mv) const;
+	std::string MoveToAlg(Move mv, MoveFormat mf = ALGEBRAIC);
 
 	std::string PVToStr(std::vector<Move> &pv) const;
 
