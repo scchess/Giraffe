@@ -434,7 +434,7 @@ std::string Board::PrintBoard() const
 }
 
 bool Board::ApplyMove(Move mv)
-{
+{	
 #define MOVE_PIECE(pt, from, to) \
 	m_boardDescBB[pt] ^= Bit(from) | Bit(to); \
 	m_boardDescU8[from] = EMPTY; \
@@ -449,6 +449,12 @@ bool Board::ApplyMove(Move mv)
 	m_boardDescBB[pt_old] &= InvBit(sq); \
 	m_boardDescBB[pt_new] |= Bit(sq); \
 	m_boardDescU8[sq] = pt_new;
+
+	if (mv == NULL_MOVE)
+	{
+		MakeNullMove();
+		return true;
+	}
 
 	UndoListBB &ulBB = m_undoStackBB.PrePush();
 	UndoListU8 &ulU8 = m_undoStackU8.PrePush();
@@ -1036,6 +1042,11 @@ void Board::UndoMove()
 
 std::string Board::MoveToAlg(Move mv) const
 {
+	if (mv == NULL_MOVE)
+	{
+		return "null";
+	}
+
 	Square from = GetFromSquare(mv);
 	Square to = GetToSquare(mv);
 	PieceType promo = GetPromoType(mv);
@@ -1050,6 +1061,19 @@ std::string Board::MoveToAlg(Move mv) const
 		ret += static_cast<char>(tolower(PieceTypeToChar(promo)));
 	}
 
+	return ret;
+}
+
+std::string Board::PVToStr(std::vector<Move> &pv) const
+{
+	Board boardCopy = *this;
+	std::string ret;
+	for (const auto &move : pv)
+	{
+		ret += boardCopy.MoveToAlg(move);
+		ret += ' ';
+		boardCopy.ApplyMove(move);
+	}
 	return ret;
 }
 
