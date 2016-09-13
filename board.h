@@ -368,4 +368,6 @@ uint64_t DebugPerftWithNull(Board &b, uint32_t depth);
 
 void DebugRunPerftTests();
 
+void DebugRunSANTests();
+
 #endif // BOARD_H
