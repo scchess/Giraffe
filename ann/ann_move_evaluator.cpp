@@ -244,7 +244,7 @@ void ANNMoveEvaluator::EvaluateMoves(Board &board, SearchInfo &si, MoveInfoList 
 		FeaturesConv::ConvertMovesToNN(board, convInfo, ml, xNN);
 
 		entry.first = board.GetHash();
-		entry.second = m_ann.ForwardMultiple(xNN);
+		entry.second = *m_ann.ForwardMultiple(xNN);
 
 		// scale to max 1 (NOT normalize)
 		entry.second /= entry.second.maxCoeff();

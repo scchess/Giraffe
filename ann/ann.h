@@ -62,6 +62,12 @@ public:
 		++m_numArgsPushed;
 	}
 
+	void PushBool(bool x)
+	{
+		lua_pushboolean(m_state, x);
+		++m_numArgsPushed;
+	}
+
 	void PushTensor(THFloatTensor *tensor)
 	{
 		THFloatTensor_retain(tensor);
@@ -135,7 +141,7 @@ public:
 	float ForwardSingle(const Eigen::MatrixBase<Derived> &v);
 
 	template <typename Derived>
-	NNMatrixRM ForwardMultiple(const Eigen::MatrixBase<Derived> &x);
+	NNMatrixRM *ForwardMultiple(const Eigen::MatrixBase<Derived> &x);
 
 	float Train(const NNMatrixRM &x, const NNMatrixRM &t);
 
@@ -173,6 +179,8 @@ public:
 private:
 	void Init_();
 
+	void SetIsTraining_(bool training);
+
 	bool m_eigenOnly = false;
 	bool m_eigenAnnUpToDate = false;
 	EigenANN m_eigenAnn;
@@ -183,6 +191,9 @@ private:
 	THFloatTensor *m_inputTensorMultiple = nullptr;
 	THFloatTensor *m_trainingX = nullptr;
 	THFloatTensor *m_trainingT = nullptr;
+
+	// This is used by multiple forward
+	NNMatrixRM m_outputMatrix;
 
 	// This is for ToString(), which may be called from multiple threads
 	mutable std::mutex m_mutex;
@@ -221,8 +232,17 @@ float ANN::ForwardSingle(const Eigen::MatrixBase<Derived> &v)
 }
 
 template <typename Derived>
-NNMatrixRM ANN::ForwardMultiple(const Eigen::MatrixBase<Derived> &x)
+NNMatrixRM *ANN::ForwardMultiple(const Eigen::MatrixBase<Derived> &x)
 {
+#if 1
+	if (!m_eigenAnnUpToDate)
+	{
+		m_eigenAnn.FromString(ToString());
+		m_eigenAnnUpToDate = true;
+	}
+
+	return m_eigenAnn.ForwardMultiple(x);
+#else
 	if (!m_inputTensorMultiple)
 	{
 		m_inputTensorMultiple = THFloatTensor_newWithSize2d(x.rows(), x.cols());
@@ -241,8 +261,9 @@ NNMatrixRM ANN::ForwardMultiple(const Eigen::MatrixBase<Derived> &x)
 	auto tensor = forwardCall.PopTensor();
 	Eigen::Map<NNMatrixRM> returnedTensorMap(THFloatTensor_data(tensor), x.rows(), 1);
 
-	NNMatrixRM ret(returnedTensorMap);
-	return ret;
+	m_outputMatrix = returnedTensorMap;
+	return &m_outputMatrix;
+#endif
 }
 
 #endif // ANN_H

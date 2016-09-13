@@ -99,6 +99,11 @@ void EigenANN::FromString(const std::string &s)
 		{
 			m_layers.push_back(std::unique_ptr<Layer>(new TanhLayer));
 		}
+		else if (layerType == "nn.Identity")
+		{
+			// this is used for dropout
+			// ignore
+		}
 		else
 		{
 			std::cerr << "Layer type " << layerType << " not implemented!" << std::endl;
