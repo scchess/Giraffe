@@ -1276,6 +1276,14 @@ Move Board::ParseMove(std::string str)
 	MoveList moveList;
 	GenerateAllLegalMoves<ALL>(moveList);
 
+	// remove (, ), =, -, +, #, !, ?, x since they are purely decorative and do not help with disambiguation
+	char decChars[] = "()=-+#!?x";
+
+	for (uint32_t i = 0; i < strlen(decChars); ++i)
+	{
+		str.erase(std::remove(str.begin(), str.end(), decChars[i]), str.end());
+	}
+
 	if (PatternMatch(str, "[a-h][1-8][a-h][1-8]"))
 	{
 		char srcX;
@@ -1353,6 +1361,212 @@ Move Board::ParseMove(std::string str)
 				}
 			}
 		}
+	}
+	else if (str == "OO" || str == "oo" || str == "00")
+	{
+		for (auto &mv : moveList)
+		{
+			if (GetPieceType(mv) == WK && GetFromSquare(mv) == E1 && GetToSquare(mv) == G1)
+			{
+				return mv;
+			}
+			else if (GetPieceType(mv) == BK && GetFromSquare(mv) == E8 && GetToSquare(mv) == G8)
+			{
+				return mv;
+			}
+		}
+
+		std::cerr << "Illegal castling: " << str << std::endl;
+		return 0;
+	}
+	else if (str == "OOO" || str == "ooo" || str == "000")
+	{
+		for (auto &mv : moveList)
+		{
+			if (GetPieceType(mv) == WK && GetFromSquare(mv) == E1 && GetToSquare(mv) == C1)
+			{
+				return mv;
+			}
+			else if (GetPieceType(mv) == BK && GetFromSquare(mv) == E8 && GetToSquare(mv) == C8)
+			{
+				return mv;
+			}
+		}
+
+		std::cerr << "Illegal castling: " << str << std::endl;
+		return 0;
+	}
+	else if (!PatternMatch(str, "[KQBNR]?[a-h]?[1-8]?[a-h][1-8][QBRN]?"))
+	{
+		return 0;
+	}
+	else
+	{
+		PieceType pt;
+		PieceType promoType = 0;
+
+		std::string fullStr = str;
+
+		switch (str[0])
+		{
+		case 'K':
+			pt = K;
+			break;
+		case 'Q':
+			pt = Q;
+			break;
+		case 'R':
+			pt = R;
+			break;
+		case 'B':
+			pt = B;
+			break;
+		case 'N':
+			pt = N;
+			break;
+		default:
+			pt = P;
+			break;
+		}
+
+		if (pt != P)
+		{
+			str = str.substr(1);
+		}
+
+		if (GetSideToMove() == BLACK)
+		{
+			pt |= BLACK;
+		}
+
+		char lastChar = str[str.size() - 1];
+		if (lastChar == 'Q' || lastChar == 'R' || lastChar == 'B' || lastChar == 'N')
+		{
+			if (pt != P)
+			{
+				std::cerr << "Are you trying to promote a non-pawn? " << str << std::endl;
+				return 0;
+			}
+
+			switch (lastChar)
+			{
+			case 'Q':
+				promoType = Q;
+				break;
+			case 'R':
+				promoType = R;
+				break;
+			case 'B':
+				promoType = B;
+				break;
+			case 'N':
+				promoType = N;
+				break;
+			default:
+				assert(false);
+				break;
+			}
+
+			str = str.substr(0, str.size() - 1);
+		}
+
+		// get the to square
+		int x = str[str.size() - 2] - 'a';
+		int y = str[str.size() - 1] - '1';
+
+		if (x < 0 || x >= 8 || y < 0 || y >= 8)
+		{
+			std::cerr << str.substr(str.size() - 2) << " is not a valid destination square" << std::endl;
+			return 0;
+		}
+
+		Square to = Sq(x, y);
+
+		str = str.substr(0, str.size() - 2);
+
+		// now we have either file only, rank only, or both
+		int xFromConstraint = -1;
+		int yFromConstraint = -1;
+
+		if (str.size() == 0)
+		{
+			// no constraints
+		}
+		else if (str.size() == 1)
+		{
+			if (str[0] >= 'a' && str[0] <= 'h')
+			{
+				xFromConstraint = str[0] - 'a';
+			}
+			else if (str[0] >= '1' && str[0] <= '8')
+			{
+				yFromConstraint = str[0] - '1';
+			}
+			else
+			{
+				std::cerr << "Move not recognized: " << str << std::endl;
+				return 0;
+			}
+		}
+		else if (str.size() == 2)
+		{
+			if (str[0] >= 'a' && str[0] <= 'h' && str[1] >= '1' && str[1] <= '8')
+			{
+				xFromConstraint = str[0] - 'a';
+				yFromConstraint = str[1] - '1';
+			}
+			else
+			{
+				std::cerr << "Move not recognized: " << str << std::endl;
+			}
+		}
+		else
+		{
+			std::cerr << "Move is too long! " << str << " (" << fullStr << ")" << std::endl;
+			return 0;
+		}
+
+		// now we can finally look through the list!
+		Move match = 0;
+		for (auto &move : moveList)
+		{
+			if (GetPieceType(move) != pt)
+			{
+				continue;
+			}
+
+			if (GetToSquare(move) != to)
+			{
+				continue;
+			}
+
+			if ((pt == WP || pt == BP) && (promoType != GetPromoType(move)))
+			{
+				continue;
+			}
+
+			if (xFromConstraint != -1 && GetX(GetFromSquare(move)) != xFromConstraint)
+			{
+				continue;
+			}
+
+			if (yFromConstraint != -1 && GetY(GetFromSquare(move)) != yFromConstraint)
+			{
+				continue;
+			}
+
+			if (match != 0)
+			{
+				std::cerr << "Move is ambiguous: " << str << std::endl;
+				return 0;
+			}
+			else
+			{
+				match = move;
+			}
+		}
+
+		return match;
 	}
 
 	return 0;
@@ -2707,4 +2921,31 @@ void DebugRunPerftTests()
 	if (!CheckPerftWithNull("r2q1rk1/pP1p2pp/Q4n2/bbp1p3/Np6/1B3NBn/pPPP1PPP/R3K2R b KQ - 0 1", 6, 706045033ULL)) { abort(); }
 	if (!CheckPerftWithNull("rnbqkb1r/pp1p1ppp/2p5/4P3/2B5/8/PPP1NnPP/RNBQK2R w KQkq - 0 6", 3, 53392ULL)) { abort(); }
 	if (!CheckPerftWithNull("r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10", 5, 164075551ULL)) { abort(); }
+}
+
+void DebugRunSANTests()
+{
+	std::vector<std::string> positions =
+	{
+		"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+		"r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq -",
+		"8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - -",
+		"r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1",
+		"r2q1rk1/pP1p2pp/Q4n2/bbp1p3/Np6/1B3NBn/pPPP1PPP/R3K2R b KQ - 0 1",
+		"rnbqkb1r/pp1p1ppp/2p5/4P3/2B5/8/PPP1NnPP/RNBQK2R w KQkq - 0 6",
+		"r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10",
+		"Bn1N3R/ppPpNR1r/BnBr1NKR/k3pP2/3PR2R/N7/3P2P1/4Q2R w - e6 0 1" // this is the crazy SAN test position
+	};
+
+	for (const auto &position : positions)
+	{
+		MoveList ml;
+		Board board(position);
+		board.GenerateAllLegalMoves<Board::ALL>(ml);
+
+		for (auto &move : ml)
+		{
+			assert(board.ParseMove(board.MoveToAlg(move, Board::SAN)) == move);
+		}
+	}
 }
