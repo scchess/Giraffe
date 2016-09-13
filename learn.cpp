@@ -222,7 +222,7 @@ void TDL(const std::string &positionsFilename)
 
 				ttable.InvalidateAllEntries();
 
-				// make a copy of the evaluator because evaluator is not thread-safe (due to caching)
+				// make a copy of the evaluator because evaluator is not thread-safe
 				ANNEvaluator annEvalThread(true /* Eigen-only */);
 				annEvalThread.FromString(annParams);
 
