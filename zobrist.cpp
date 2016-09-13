@@ -30,6 +30,10 @@ uint64_t W_LONG_CASTLE_ZOBRIST;
 uint64_t B_SHORT_CASTLE_ZOBRIST;
 uint64_t B_LONG_CASTLE_ZOBRIST;
 
+uint64_t MOVE_FROM_ZOBRIST[64];
+uint64_t MOVE_TO_ZOBRIST[64];
+uint64_t PROMO_TYPE_ZOBRIST[PIECE_TYPE_LAST + 1];
+
 void InitializeZobrist()
 {
 	std::mt19937_64 gen(53820873); // using the default seed
@@ -42,6 +46,13 @@ void InitializeZobrist()
 		}
 
 		EN_PASS_ZOBRIST[sq] = gen();
+		MOVE_FROM_ZOBRIST[sq] = gen();
+		MOVE_TO_ZOBRIST[sq] = gen();
+	}
+
+	for (PieceType pt = 0; pt <= PIECE_TYPE_LAST; ++pt)
+	{
+		PROMO_TYPE_ZOBRIST[pt] = gen();
 	}
 
 	SIDE_TO_MOVE_ZOBRIST = gen();
