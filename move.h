@@ -22,6 +22,7 @@
 
 #include "types.h"
 #include "containers.h"
+#include "zobrist.h"
 
 // what's the maximum number of possible moves from any position?
 // 216 seems to be a popular number
@@ -141,6 +142,15 @@ inline void SetCastlingType(Move &mv, uint32_t type)
 	assert(!IsCastling(mv));
 #endif
 	mv |= type;
+}
+
+inline uint64_t GetMoveHash(Move mv)
+{
+	uint64_t hash = 0;
+	hash ^= MOVE_FROM_ZOBRIST[GetFromSquare(mv)];
+	hash ^= MOVE_TO_ZOBRIST[GetToSquare(mv)];
+	hash ^= PROMO_TYPE_ZOBRIST[GetPromoType(mv)];
+	return hash;
 }
 
 typedef FixedVector<Move, MAX_LEGAL_MOVES> MoveList;

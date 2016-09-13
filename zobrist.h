@@ -33,6 +33,11 @@ extern uint64_t W_LONG_CASTLE_ZOBRIST;
 extern uint64_t B_SHORT_CASTLE_ZOBRIST;
 extern uint64_t B_LONG_CASTLE_ZOBRIST;
 
+// for move hashing
+extern uint64_t MOVE_FROM_ZOBRIST[64];
+extern uint64_t MOVE_TO_ZOBRIST[64];
+extern uint64_t PROMO_TYPE_ZOBRIST[PIECE_TYPE_LAST + 1];
+
 void InitializeZobrist();
 
 #endif // ZOBRIST_H
