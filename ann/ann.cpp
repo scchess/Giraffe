@@ -68,11 +68,16 @@ float ANN::Train(const NNMatrixRM &x, const NNMatrixRM &t)
 	xMap = x;
 	tMap = t;
 
+	SetIsTraining_(true);
+
 	LuaFunctionCall<2, 1> trainCall(m_luaState, "train_batch");
 	trainCall.PushTensor(m_trainingX);
 	trainCall.PushTensor(m_trainingT);
 	trainCall.Call();
-	return trainCall.PopNumber(); // loss
+	auto loss = trainCall.PopNumber(); // loss
+
+	SetIsTraining_(false);
+	return loss;
 }
 
 void ANN::Load(const std::string &filename)
@@ -84,6 +89,8 @@ void ANN::Load(const std::string &filename)
 
 	m_eigenAnn.FromString(ToString());
 	m_eigenAnnUpToDate = true;
+
+	SetIsTraining_(false);
 }
 
 void ANN::Save(const std::string &filename)
@@ -149,4 +156,11 @@ void ANN::Init_()
 		std::cerr << "Failed to load lua/network.lua: " << lua_tostring(m_luaState, -1) << std::endl;
 		assert(false);
 	}
+}
+
+void ANN::SetIsTraining_(bool training)
+{
+	LuaFunctionCall<1, 0> isTrainingCall(m_luaState, "set_is_training");
+	isTrainingCall.PushBool(training);
+	isTrainingCall.Call();
 }

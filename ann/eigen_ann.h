@@ -64,7 +64,7 @@ public:
 	}
 
 	template <typename Derived>
-	NNMatrixRM ForwardMultiple(const Eigen::MatrixBase<Derived> &matrix)
+	NNMatrixRM *ForwardMultiple(const Eigen::MatrixBase<Derived> &matrix)
 	{
 		m_input = matrix;
 		NNMatrixRM *x = &m_input;
@@ -74,7 +74,7 @@ public:
 			x = layer->Forward(x);
 		}
 
-		return *x;
+		return x;
 	}
 
 	float Train(const NNMatrixRM &/*x*/, const NNMatrixRM &/*t*/) { throw std::logic_error("Not supported"); }
@@ -107,7 +107,8 @@ public:
 		: m_bias(bias), m_weight(weight) {}
 
 	NNMatrixRM *Forward(NNMatrixRM *input) override {
-		m_output.noalias() = *input * m_weight.transpose() + m_bias;
+		m_output.noalias() = *input * m_weight.transpose();
+		m_output.rowwise() += m_bias;
 		return &m_output;
 	}
 
