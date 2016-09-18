@@ -11,7 +11,8 @@ local net
 local criterion = nn.MSECriterion():float()
 local params, grad_params
 
-local optimizer_state = {}
+local optimizer_state_initial = { learningRate = 0.0001 }
+local optimizer_state = optimizer_state_initial
 
 function load(filename)
 	net = torch.load(filename, 'ascii')
@@ -52,6 +53,18 @@ function forward_multiple()
 	return net:forward(input_tensor_multiple)
 end
 
+function set_is_training(training)
+	if training then
+		net:training()
+	else
+		net:evaluate()
+	end
+end
+
+function reset_optimizer()
+	optimizer_state = optimizer_state_initial
+end
+
 function train_batch(x, t)
 	if params == nil then
 		params, grad_params = net:getParameters()
@@ -71,10 +84,12 @@ end
 
 function make_evaluator(numInputs)
 	net = nn.Sequential()
-	net:add(nn.Linear(numInputs, 256))
+	net:add(nn.Linear(numInputs, 512))
 	net:add(nn.ReLU())
-	net:add(nn.Linear(256, 64))
+	-- net:add(nn.Dropout(0.5))
+	net:add(nn.Linear(512, 64))
 	net:add(nn.ReLU())
+	-- net:add(nn.Dropout(0.5))
 	net:add(nn.Linear(64, 1))
 	net:add(nn.Tanh())
 	net:float()
@@ -84,18 +99,11 @@ function make_move_evaluator(numInputs)
 	net = nn.Sequential()
 	net:add(nn.Linear(numInputs, 256))
 	net:add(nn.ReLU())
+	net:add(nn.Dropout(0.5))
 	net:add(nn.Linear(256, 64))
 	net:add(nn.ReLU())
+	net:add(nn.Dropout(0.5))
 	net:add(nn.Linear(64, 1))
-	net:add(nn.Tanh())
-	net:float()
-end
-
-function make_simple(numInputs)
-	net = nn.Sequential()
-	net:add(nn.Linear(numInputs, 5))
-	net:add(nn.ReLU())
-	net:add(nn.Linear(5, 3))
 	net:add(nn.Tanh())
 	net:float()
 end
@@ -140,6 +148,11 @@ function to_eigen_string()
 			output = output .. "nn.ReLU\n"
 		elseif typename == "nn.Tanh" then
 			output = output .. "nn.Tanh\n"
+		elseif typename == "nn.Dropout" then
+			-- We can ignore Dropout because we are using version 2 of
+			-- dropout which scales outputs during training, so no scaling
+			-- is needed in evaluation
+			output = output .. "nn.Identity\n"
 		else
 			print("Unknown typename " .. typename)
 		end

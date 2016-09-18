@@ -68,6 +68,8 @@ public:
 	// Targets should be in STM
 	float Train(const NNMatrixRM &x, const NNMatrixRM &t);
 
+	void ResetOptimizer() { m_ann.ResetOptimizer(); }
+
 	bool IsANNEval() override { return true; }
 
 	Score EvaluateForSTM(Board &b, Score lowerBound = SCORE_MIN, Score upperBound = SCORE_MAX) override;
