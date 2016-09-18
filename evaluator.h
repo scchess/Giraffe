@@ -33,6 +33,8 @@ class EvaluatorIface
 public:
 	constexpr static float EvalFullScale = 10000.0f;
 
+	virtual bool IsANNEval() { return false; }
+
 	// return score for side to move
 	virtual Score EvaluateForSTM(Board &b, Score lowerBound = SCORE_MIN, Score upperBound = SCORE_MAX)
 	{

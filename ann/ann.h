@@ -151,6 +151,12 @@ public:
 	std::string ToString() const;
 	void FromString(const std::string &s);
 
+	void ResetOptimizer()
+	{
+		LuaFunctionCall<0, 0> call(m_luaState, "reset_optimizer");
+		call.Call();
+	}
+
 	ANN &operator=(ANN &&other)
 	{
 		m_luaState = other.m_luaState;
@@ -185,7 +191,7 @@ private:
 	bool m_eigenAnnUpToDate = false;
 	EigenANN m_eigenAnn;
 
-	mutable lua_State *m_luaState;
+	mutable lua_State *m_luaState = nullptr;
 
 	THFloatTensor *m_inputTensorSingle = nullptr;
 	THFloatTensor *m_inputTensorMultiple = nullptr;
