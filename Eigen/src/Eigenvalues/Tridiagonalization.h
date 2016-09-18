@@ -126,8 +126,9 @@ template<typename _MatrixType> class Tridiagonalization
       * Example: \include Tridiagonalization_Tridiagonalization_MatrixType.cpp
       * Output: \verbinclude Tridiagonalization_Tridiagonalization_MatrixType.out
       */
-    explicit Tridiagonalization(const MatrixType& matrix)
-      : m_matrix(matrix),
+    template<typename InputType>
+    explicit Tridiagonalization(const EigenBase<InputType>& matrix)
+      : m_matrix(matrix.derived()),
         m_hCoeffs(matrix.cols() > 1 ? matrix.cols()-1 : 1),
         m_isInitialized(false)
     {
@@ -152,9 +153,10 @@ template<typename _MatrixType> class Tridiagonalization
       * Example: \include Tridiagonalization_compute.cpp
       * Output: \verbinclude Tridiagonalization_compute.out
       */
-    Tridiagonalization& compute(const MatrixType& matrix)
+    template<typename InputType>
+    Tridiagonalization& compute(const EigenBase<InputType>& matrix)
     {
-      m_matrix = matrix;
+      m_matrix = matrix.derived();
       m_hCoeffs.resize(matrix.rows()-1, 1);
       internal::tridiagonalization_inplace(m_matrix, m_hCoeffs);
       m_isInitialized = true;
@@ -365,10 +367,10 @@ void tridiagonalization_inplace(MatrixType& matA, CoeffVectorType& hCoeffs)
     hCoeffs.tail(n-i-1).noalias() = (matA.bottomRightCorner(remainingSize,remainingSize).template selfadjointView<Lower>()
                                   * (conj(h) * matA.col(i).tail(remainingSize)));
 
-    hCoeffs.tail(n-i-1) += (conj(h)*Scalar(-0.5)*(hCoeffs.tail(remainingSize).dot(matA.col(i).tail(remainingSize)))) * matA.col(i).tail(n-i-1);
+    hCoeffs.tail(n-i-1) += (conj(h)*RealScalar(-0.5)*(hCoeffs.tail(remainingSize).dot(matA.col(i).tail(remainingSize)))) * matA.col(i).tail(n-i-1);
 
     matA.bottomRightCorner(remainingSize, remainingSize).template selfadjointView<Lower>()
-      .rankUpdate(matA.col(i).tail(remainingSize), hCoeffs.tail(remainingSize), -1);
+      .rankUpdate(matA.col(i).tail(remainingSize), hCoeffs.tail(remainingSize), Scalar(-1));
 
     matA.col(i).coeffRef(i+1) = beta;
     hCoeffs.coeffRef(i) = h;

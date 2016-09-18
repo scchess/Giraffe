@@ -141,6 +141,10 @@ class PastixBase : public SparseSolverBase<Derived>
     typedef typename MatrixType::StorageIndex StorageIndex;
     typedef Matrix<Scalar,Dynamic,1> Vector;
     typedef SparseMatrix<Scalar, ColMajor> ColSpMatrix;
+    enum {
+      ColsAtCompileTime = MatrixType::ColsAtCompileTime,
+      MaxColsAtCompileTime = MatrixType::MaxColsAtCompileTime
+    };
     
   public:
     
@@ -180,7 +184,7 @@ class PastixBase : public SparseSolverBase<Derived>
       * The statistics related to the different phases of factorization and solve are saved here as well
       * \sa analyzePattern() factorize()
       */
-    Array<RealScalar,IPARM_SIZE,1>& dparm()
+    Array<double,DPARM_SIZE,1>& dparm()
     {
       return m_dparm; 
     }
@@ -240,8 +244,8 @@ class PastixBase : public SparseSolverBase<Derived>
     mutable ComputationInfo m_info; 
     mutable pastix_data_t *m_pastixdata; // Data structure for pastix
     mutable int m_comm; // The MPI communicator identifier
-    mutable Matrix<int,IPARM_SIZE,1> m_iparm; // integer vector for the input parameters
-    mutable Matrix<double,DPARM_SIZE,1> m_dparm; // Scalar vector for the input parameters
+    mutable Array<int,IPARM_SIZE,1> m_iparm; // integer vector for the input parameters
+    mutable Array<double,DPARM_SIZE,1> m_dparm; // Scalar vector for the input parameters
     mutable Matrix<StorageIndex,Dynamic,1> m_perm;  // Permutation vector
     mutable Matrix<StorageIndex,Dynamic,1> m_invp;  // Inverse permutation vector
     mutable int m_size; // Size of the matrix 
@@ -264,7 +268,7 @@ void PastixBase<Derived>::init()
          0, 0, 0, 1, m_iparm.data(), m_dparm.data());
   
   m_iparm[IPARM_MATRIX_VERIFICATION] = API_NO;
-  m_iparm[IPARM_VERBOSE]             = 2;
+  m_iparm[IPARM_VERBOSE]             = API_VERBOSE_NOT;
   m_iparm[IPARM_ORDERING]            = API_ORDER_SCOTCH;
   m_iparm[IPARM_INCOMPLETE]          = API_NO;
   m_iparm[IPARM_OOC_LIMIT]           = 2000;
@@ -398,8 +402,10 @@ bool PastixBase<Base>::_solve_impl(const MatrixBase<Rhs> &b, MatrixBase<Dest> &x
   * NOTE : Note that if the analysis and factorization phase are called separately, 
   * the input matrix will be symmetrized at each call, hence it is advised to 
   * symmetrize the matrix in a end-user program and set \p IsStrSym to true
-  * 
-  * \sa \ref TutorialSparseDirectSolvers
+  *
+  * \implsparsesolverconcept
+  *
+  * \sa \ref TutorialSparseSolverConcept, class SparseLU
   * 
   */
 template<typename _MatrixType, bool IsStrSym>
@@ -509,8 +515,10 @@ class PastixLU : public PastixBase< PastixLU<_MatrixType> >
   * 
   * \tparam MatrixType the type of the sparse matrix A, it must be a SparseMatrix<>
   * \tparam UpLo The part of the matrix to use : Lower or Upper. The default is Lower as required by PaStiX
-  * 
-  * \sa \ref TutorialSparseDirectSolvers
+  *
+  * \implsparsesolverconcept
+  *
+  * \sa \ref TutorialSparseSolverConcept, class SimplicialLLT
   */
 template<typename _MatrixType, int _UpLo>
 class PastixLLT : public PastixBase< PastixLLT<_MatrixType, _UpLo> >
@@ -573,6 +581,7 @@ class PastixLLT : public PastixBase< PastixLLT<_MatrixType, _UpLo> >
     
     void grabMatrix(const MatrixType& matrix, ColSpMatrix& out)
     {
+      out.resize(matrix.rows(), matrix.cols());
       // Pastix supports only lower, column-major matrices 
       out.template selfadjointView<Lower>() = matrix.template selfadjointView<UpLo>();
       internal::c_to_fortran_numbering(out);
@@ -590,8 +599,10 @@ class PastixLLT : public PastixBase< PastixLLT<_MatrixType, _UpLo> >
   * 
   * \tparam MatrixType the type of the sparse matrix A, it must be a SparseMatrix<>
   * \tparam UpLo The part of the matrix to use : Lower or Upper. The default is Lower as required by PaStiX
-  * 
-  * \sa \ref TutorialSparseDirectSolvers
+  *
+  * \implsparsesolverconcept
+  *
+  * \sa \ref TutorialSparseSolverConcept, class SimplicialLDLT
   */
 template<typename _MatrixType, int _UpLo>
 class PastixLDLT : public PastixBase< PastixLDLT<_MatrixType, _UpLo> >
@@ -656,6 +667,7 @@ class PastixLDLT : public PastixBase< PastixLDLT<_MatrixType, _UpLo> >
     void grabMatrix(const MatrixType& matrix, ColSpMatrix& out)
     {
       // Pastix supports only lower, column-major matrices 
+      out.resize(matrix.rows(), matrix.cols());
       out.template selfadjointView<Lower>() = matrix.template selfadjointView<UpLo>();
       internal::c_to_fortran_numbering(out);
     }

@@ -14,56 +14,7 @@ namespace Eigen {
 
 template<typename Lhs, typename Rhs, int Option, typename StorageKind> class ProductImpl;
 
-/** \class Product
-  * \ingroup Core_Module
-  *
-  * \brief Expression of the product of two arbitrary matrices or vectors
-  *
-  * \param Lhs the type of the left-hand side expression
-  * \param Rhs the type of the right-hand side expression
-  *
-  * This class represents an expression of the product of two arbitrary matrices.
-  * 
-  * The other template parameters are:
-  * \tparam Option     can be DefaultProduct, AliasFreeProduct, or LazyProduct
-  *
-  */
-
-
 namespace internal {
-
-// Determine the scalar of Product<Lhs, Rhs>. This is normally the same as Lhs::Scalar times
-// Rhs::Scalar, but product with permutation matrices inherit the scalar of the other factor.
-template<typename Lhs, typename Rhs, typename LhsShape = typename evaluator_traits<Lhs>::Shape, 
-         typename RhsShape = typename evaluator_traits<Rhs>::Shape >
-struct product_result_scalar
-{
-  typedef typename scalar_product_traits<typename Lhs::Scalar, typename Rhs::Scalar>::ReturnType Scalar;
-};
-
-template<typename Lhs, typename Rhs, typename RhsShape>
-struct product_result_scalar<Lhs, Rhs, PermutationShape, RhsShape>
-{
-  typedef typename Rhs::Scalar Scalar;
-};
-
-template<typename Lhs, typename Rhs, typename LhsShape>
-  struct product_result_scalar<Lhs, Rhs, LhsShape, PermutationShape>
-{
-  typedef typename Lhs::Scalar Scalar;
-};
-
-template<typename Lhs, typename Rhs, typename RhsShape>
-struct product_result_scalar<Lhs, Rhs, TranspositionsShape, RhsShape>
-{
-  typedef typename Rhs::Scalar Scalar;
-};
-
-template<typename Lhs, typename Rhs, typename LhsShape>
-  struct product_result_scalar<Lhs, Rhs, LhsShape, TranspositionsShape>
-{
-  typedef typename Lhs::Scalar Scalar;
-};
 
 template<typename Lhs, typename Rhs, int Option>
 struct traits<Product<Lhs, Rhs, Option> >
@@ -75,7 +26,7 @@ struct traits<Product<Lhs, Rhs, Option> >
   
   typedef MatrixXpr XprKind;
   
-  typedef typename product_result_scalar<LhsCleaned,RhsCleaned>::Scalar Scalar;
+  typedef typename ScalarBinaryOpTraits<typename traits<LhsCleaned>::Scalar, typename traits<RhsCleaned>::Scalar>::ReturnType Scalar;
   typedef typename product_promote_storage_type<typename LhsTraits::StorageKind,
                                                 typename RhsTraits::StorageKind,
                                                 internal::product_type<Lhs,Rhs>::ret>::ret StorageKind;
@@ -102,7 +53,20 @@ struct traits<Product<Lhs, Rhs, Option> >
 
 } // end namespace internal
 
-
+/** \class Product
+  * \ingroup Core_Module
+  *
+  * \brief Expression of the product of two arbitrary matrices or vectors
+  *
+  * \tparam _Lhs the type of the left-hand side expression
+  * \tparam _Rhs the type of the right-hand side expression
+  *
+  * This class represents an expression of the product of two arbitrary matrices.
+  *
+  * The other template parameters are:
+  * \tparam Option     can be DefaultProduct, AliasFreeProduct, or LazyProduct
+  *
+  */
 template<typename _Lhs, typename _Rhs, int Option>
 class Product : public ProductImpl<_Lhs,_Rhs,Option,
                                    typename internal::product_promote_storage_type<typename internal::traits<_Lhs>::StorageKind,
@@ -165,7 +129,7 @@ public:
   
   operator const Scalar() const
   {
-    return typename internal::evaluator<ProductXpr>::type(derived()).coeff(0,0);
+    return internal::evaluator<ProductXpr>(derived()).coeff(0,0);
   }
 };
 
@@ -203,7 +167,7 @@ class ProductImpl<Lhs,Rhs,Option,Dense>
       EIGEN_STATIC_ASSERT(EnableCoeff, THIS_METHOD_IS_ONLY_FOR_INNER_OR_LAZY_PRODUCTS);
       eigen_assert( (Option==LazyProduct) || (this->rows() == 1 && this->cols() == 1) );
       
-      return typename internal::evaluator<Derived>::type(derived()).coeff(row,col);
+      return internal::evaluator<Derived>(derived()).coeff(row,col);
     }
 
     EIGEN_DEVICE_FUNC Scalar coeff(Index i) const
@@ -211,34 +175,11 @@ class ProductImpl<Lhs,Rhs,Option,Dense>
       EIGEN_STATIC_ASSERT(EnableCoeff, THIS_METHOD_IS_ONLY_FOR_INNER_OR_LAZY_PRODUCTS);
       eigen_assert( (Option==LazyProduct) || (this->rows() == 1 && this->cols() == 1) );
       
-      return typename internal::evaluator<Derived>::type(derived()).coeff(i);
+      return internal::evaluator<Derived>(derived()).coeff(i);
     }
     
   
 };
-
-/***************************************************************************
-* Implementation of matrix base methods
-***************************************************************************/
-
-
-/** \internal used to test the evaluator only
-  */
-template<typename Lhs,typename Rhs>
-const Product<Lhs,Rhs>
-prod(const Lhs& lhs, const Rhs& rhs)
-{
-  return Product<Lhs,Rhs>(lhs,rhs);
-}
-
-/** \internal used to test the evaluator only
-  */
-template<typename Lhs,typename Rhs>
-const Product<Lhs,Rhs,LazyProduct>
-lazyprod(const Lhs& lhs, const Rhs& rhs)
-{
-  return Product<Lhs,Rhs,LazyProduct>(lhs,rhs);
-}
 
 } // end namespace Eigen
 

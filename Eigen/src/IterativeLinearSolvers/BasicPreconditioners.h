@@ -23,6 +23,8 @@ namespace Eigen {
   *
   * \tparam _Scalar the type of the scalar.
   *
+  * \implsparsesolverconcept
+  *
   * This preconditioner is suitable for both selfadjoint and general problems.
   * The diagonal entries are pre-inverted and stored into a dense vector.
   *
@@ -37,8 +39,10 @@ class DiagonalPreconditioner
     typedef Matrix<Scalar,Dynamic,1> Vector;
   public:
     typedef typename Vector::StorageIndex StorageIndex;
-    // this typedef is only to export the scalar type and compile-time dimensions to solve_retval
-    typedef Matrix<Scalar,Dynamic,Dynamic> MatrixType;
+    enum {
+      ColsAtCompileTime = Dynamic,
+      MaxColsAtCompileTime = Dynamic
+    };
 
     DiagonalPreconditioner() : m_isInitialized(false) {}
 
@@ -95,6 +99,8 @@ class DiagonalPreconditioner
                 && "DiagonalPreconditioner::solve(): invalid number of rows of the right hand side matrix b");
       return Solve<DiagonalPreconditioner, Rhs>(*this, b.derived());
     }
+    
+    ComputationInfo info() { return Success; }
 
   protected:
     Vector m_invdiag;
@@ -111,6 +117,8 @@ class DiagonalPreconditioner
     \endcode
   *
   * \tparam _Scalar the type of the scalar.
+  *
+  * \implsparsesolverconcept
   *
   * The diagonal entries are pre-inverted and stored into a dense vector.
   * 
@@ -161,12 +169,16 @@ class LeastSquareDiagonalPreconditioner : public DiagonalPreconditioner<_Scalar>
     {
       return factorize(mat);
     }
+    
+    ComputationInfo info() { return Success; }
 
   protected:
 };
 
 /** \ingroup IterativeLinearSolvers_Module
   * \brief A naive preconditioner which approximates any matrix as the identity matrix
+  *
+  * \implsparsesolverconcept
   *
   * \sa class DiagonalPreconditioner
   */
@@ -190,6 +202,8 @@ class IdentityPreconditioner
     
     template<typename Rhs>
     inline const Rhs& solve(const Rhs& b) const { return b; }
+    
+    ComputationInfo info() { return Success; }
 };
 
 } // end namespace Eigen

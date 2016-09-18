@@ -32,12 +32,13 @@ class SparseView : public SparseMatrixBase<SparseView<MatrixType> >
 {
   typedef typename MatrixType::Nested MatrixTypeNested;
   typedef typename internal::remove_all<MatrixTypeNested>::type _MatrixTypeNested;
+  typedef SparseMatrixBase<SparseView > Base;
 public:
   EIGEN_SPARSE_PUBLIC_INTERFACE(SparseView)
   typedef typename internal::remove_all<MatrixType>::type NestedExpression;
 
   explicit SparseView(const MatrixType& mat, const Scalar& reference = Scalar(0),
-                      RealScalar epsilon = NumTraits<Scalar>::dummy_precision())
+                      const RealScalar &epsilon = NumTraits<Scalar>::dummy_precision())
     : m_matrix(mat), m_reference(reference), m_epsilon(epsilon) {}
 
   inline Index rows() const { return m_matrix.rows(); }
@@ -114,7 +115,7 @@ struct unary_evaluator<SparseView<ArgType>, IteratorBased>
     explicit unary_evaluator(const XprType& xpr) : m_argImpl(xpr.nestedExpression()), m_view(xpr) {}
 
   protected:
-    typename evaluator<ArgType>::nestedType m_argImpl;
+    evaluator<ArgType> m_argImpl;
     const XprType &m_view;
 };
 
@@ -127,6 +128,7 @@ struct unary_evaluator<SparseView<ArgType>, IndexBased>
   protected:
     enum { IsRowMajor = (XprType::Flags&RowMajorBit)==RowMajorBit };
     typedef typename XprType::Scalar Scalar;
+    typedef typename XprType::StorageIndex StorageIndex;
   public:
     
     class InnerIterator
@@ -152,7 +154,7 @@ struct unary_evaluator<SparseView<ArgType>, IndexBased>
                               : m_sve.m_argImpl.coeff(m_inner, m_outer);
         }
 
-        EIGEN_STRONG_INLINE Index index() const { return m_inner; }
+        EIGEN_STRONG_INLINE StorageIndex index() const { return m_inner; }
         inline Index row() const { return IsRowMajor ? m_outer : index(); }
         inline Index col() const { return IsRowMajor ? index() : m_outer; }
 
@@ -182,7 +184,7 @@ struct unary_evaluator<SparseView<ArgType>, IndexBased>
     explicit unary_evaluator(const XprType& xpr) : m_argImpl(xpr.nestedExpression()), m_view(xpr) {}
 
   protected:
-    typename evaluator<ArgType>::nestedType m_argImpl;
+    evaluator<ArgType> m_argImpl;
     const XprType &m_view;
 };
 

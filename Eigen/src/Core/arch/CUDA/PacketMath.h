@@ -21,7 +21,6 @@ namespace internal {
 template<> struct is_arithmetic<float4>  { enum { value = true }; };
 template<> struct is_arithmetic<double2> { enum { value = true }; };
 
-
 template<> struct packet_traits<float> : default_packet_traits
 {
   typedef float4 type;
@@ -39,6 +38,15 @@ template<> struct packet_traits<float> : default_packet_traits
     HasExp  = 1,
     HasSqrt = 1,
     HasRsqrt = 1,
+    HasLGamma = 1,
+    HasDiGamma = 1,
+    HasZeta = 1,
+    HasPolygamma = 1,
+    HasErf = 1,
+    HasErfc = 1,
+    HasIGamma = 1,
+    HasIGammac = 1,
+    HasBetaInc = 1,
 
     HasBlend = 0,
   };
@@ -59,14 +67,23 @@ template<> struct packet_traits<double> : default_packet_traits
     HasExp  = 1,
     HasSqrt = 1,
     HasRsqrt = 1,
+    HasLGamma = 1,
+    HasDiGamma = 1,
+    HasZeta = 1,
+    HasPolygamma = 1,
+    HasErf = 1,
+    HasErfc = 1,
+    HasIGamma = 1,
+    HasIGammac = 1,
+    HasBetaInc = 1,
 
     HasBlend = 0,
   };
 };
 
 
-template<> struct unpacket_traits<float4> { typedef float  type; enum {size=4}; typedef float4 half; };
-template<> struct unpacket_traits<double2> { typedef double type; enum {size=2}; typedef double2 half; };
+template<> struct unpacket_traits<float4>  { typedef float  type; enum {size=4, alignment=Aligned16}; typedef float4 half; };
+template<> struct unpacket_traits<double2> { typedef double type; enum {size=2, alignment=Aligned16}; typedef double2 half; };
 
 template<> EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE float4 pset1<float4>(const float&  from) {
   return make_float4(from, from, from, from);
@@ -76,10 +93,10 @@ template<> EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE double2 pset1<double2>(const do
 }
 
 
-template<> EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE float4 plset<float>(const float& a) {
+template<> EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE float4 plset<float4>(const float& a) {
   return make_float4(a, a+1, a+2, a+3);
 }
-template<> EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE double2 plset<double>(const double& a) {
+template<> EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE double2 plset<double2>(const double& a) {
   return make_double2(a, a+1);
 }
 
@@ -177,25 +194,39 @@ template<> EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE void pstoreu<double>(double* to
   to[1] = from.y;
 }
 
-#ifdef __CUDA_ARCH__
 template<>
 EIGEN_DEVICE_FUNC EIGEN_ALWAYS_INLINE float4 ploadt_ro<float4, Aligned>(const float* from) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 350
   return __ldg((const float4*)from);
+#else
+  return make_float4(from[0], from[1], from[2], from[3]);
+#endif
 }
 template<>
 EIGEN_DEVICE_FUNC EIGEN_ALWAYS_INLINE double2 ploadt_ro<double2, Aligned>(const double* from) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 350
   return __ldg((const double2*)from);
+#else
+  return make_double2(from[0], from[1]);
+#endif
 }
 
 template<>
 EIGEN_DEVICE_FUNC EIGEN_ALWAYS_INLINE float4 ploadt_ro<float4, Unaligned>(const float* from) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 350
   return make_float4(__ldg(from+0), __ldg(from+1), __ldg(from+2), __ldg(from+3));
+#else
+  return make_float4(from[0], from[1], from[2], from[3]);
+#endif
 }
 template<>
 EIGEN_DEVICE_FUNC EIGEN_ALWAYS_INLINE double2 ploadt_ro<double2, Unaligned>(const double* from) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 350
   return make_double2(__ldg(from+0), __ldg(from+1));
-}
+#else
+  return make_double2(from[0], from[1]);
 #endif
+}
 
 template<> EIGEN_DEVICE_FUNC inline float4 pgather<float, float4>(const float* from, Index stride) {
   return make_float4(from[0*stride], from[1*stride], from[2*stride], from[3*stride]);
@@ -244,13 +275,19 @@ template<> EIGEN_DEVICE_FUNC inline double predux_min<double2>(const double2& a)
   return fmin(a.x, a.y);
 }
 
+template<> EIGEN_DEVICE_FUNC inline float  predux_mul<float4>(const float4& a) {
+  return a.x * a.y * a.z * a.w;
+}
+template<> EIGEN_DEVICE_FUNC inline double predux_mul<double2>(const double2& a) {
+  return a.x * a.y;
+}
+
 template<> EIGEN_DEVICE_FUNC inline float4  pabs<float4>(const float4& a) {
   return make_float4(fabsf(a.x), fabsf(a.y), fabsf(a.z), fabsf(a.w));
 }
 template<> EIGEN_DEVICE_FUNC inline double2 pabs<double2>(const double2& a) {
   return make_double2(fabs(a.x), fabs(a.y));
 }
-
 
 EIGEN_DEVICE_FUNC inline void
 ptranspose(PacketBlock<float4,4>& kernel) {

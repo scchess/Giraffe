@@ -83,7 +83,7 @@ EIGEN_DONT_INLINE void triangular_solve_matrix<Scalar,Index,OnTheLeft,Mode,Conju
     // coherence when accessing the rhs elements
     std::ptrdiff_t l1, l2, l3;
     manage_caching_sizes(GetAction, &l1, &l2, &l3);
-    Index subcols = cols>0 ? l2/(4 * sizeof(Scalar) * otherStride) : 0;
+    Index subcols = cols>0 ? l2/(4 * sizeof(Scalar) * std::max<Index>(otherStride,size)) : 0;
     subcols = std::max<Index>((subcols/Traits::nr)*Traits::nr, Traits::nr);
 
     for(Index k2=IsLower ? 0 : size;
@@ -304,9 +304,12 @@ EIGEN_DONT_INLINE void triangular_solve_matrix<Scalar,Index,OnTheRight,Mode,Conj
                 for (Index i=0; i<actual_mc; ++i)
                   r[i] -= a[i] * b;
               }
-              Scalar b = (Mode & UnitDiag) ? Scalar(1) : Scalar(1)/conj(rhs(j,j));
-              for (Index i=0; i<actual_mc; ++i)
-                r[i] *= b;
+              if((Mode & UnitDiag)==0)
+              {
+                Scalar b = conj(rhs(j,j));
+                for (Index i=0; i<actual_mc; ++i)
+                  r[i] /= b;
+              }
             }
 
             // pack the just computed part of lhs to A

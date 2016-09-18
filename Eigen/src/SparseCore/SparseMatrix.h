@@ -35,7 +35,7 @@ namespace Eigen {
   * \tparam _Index the type of the indices. It has to be a \b signed type (e.g., short, int, std::ptrdiff_t). Default is \c int.
   *
   * This class can be extended with the help of the plugin mechanism described on the page
-  * \ref TopicCustomizingEigen by defining the preprocessor symbol \c EIGEN_SPARSEMATRIX_PLUGIN.
+  * \ref TopicCustomizing_Plugins by defining the preprocessor symbol \c EIGEN_SPARSEMATRIX_PLUGIN.
   */
 
 namespace internal {
@@ -92,11 +92,12 @@ template<typename _Scalar, int _Options, typename _Index>
 class SparseMatrix
   : public SparseCompressedBase<SparseMatrix<_Scalar, _Options, _Index> >
 {
-  public:
     typedef SparseCompressedBase<SparseMatrix> Base;
+    using Base::convert_index;
+  public:
     using Base::isCompressed;
     using Base::nonZeros;
-    _EIGEN_SPARSE_PUBLIC_INTERFACE(SparseMatrix)
+    EIGEN_SPARSE_PUBLIC_INTERFACE(SparseMatrix)
     using Base::operator+=;
     using Base::operator-=;
 
@@ -139,20 +140,20 @@ class SparseMatrix
     /** \returns a const pointer to the array of values.
       * This function is aimed at interoperability with other libraries.
       * \sa innerIndexPtr(), outerIndexPtr() */
-    inline const Scalar* valuePtr() const { return &m_data.value(0); }
+    inline const Scalar* valuePtr() const { return m_data.valuePtr(); }
     /** \returns a non-const pointer to the array of values.
       * This function is aimed at interoperability with other libraries.
       * \sa innerIndexPtr(), outerIndexPtr() */
-    inline Scalar* valuePtr() { return &m_data.value(0); }
+    inline Scalar* valuePtr() { return m_data.valuePtr(); }
 
     /** \returns a const pointer to the array of inner indices.
       * This function is aimed at interoperability with other libraries.
       * \sa valuePtr(), outerIndexPtr() */
-    inline const StorageIndex* innerIndexPtr() const { return &m_data.index(0); }
+    inline const StorageIndex* innerIndexPtr() const { return m_data.indexPtr(); }
     /** \returns a non-const pointer to the array of inner indices.
       * This function is aimed at interoperability with other libraries.
       * \sa valuePtr(), outerIndexPtr() */
-    inline StorageIndex* innerIndexPtr() { return &m_data.index(0); }
+    inline StorageIndex* innerIndexPtr() { return m_data.indexPtr(); }
 
     /** \returns a const pointer to the array of the starting positions of the inner vectors.
       * This function is aimed at interoperability with other libraries.
@@ -436,7 +437,13 @@ class SparseMatrix
     template<typename InputIterators>
     void setFromTriplets(const InputIterators& begin, const InputIterators& end);
 
-    void sumupDuplicates();
+    template<typename InputIterators,typename DupFunctor>
+    void setFromTriplets(const InputIterators& begin, const InputIterators& end, DupFunctor dup_func);
+
+    void sumupDuplicates() { collapseDuplicates(internal::scalar_sum_op<Scalar,Scalar>()); }
+
+    template<typename DupFunctor>
+    void collapseDuplicates(DupFunctor dup_func = DupFunctor());
 
     //---
     
@@ -508,7 +515,6 @@ class SparseMatrix
     void prune(const KeepFunc& keep = KeepFunc())
     {
       // TODO optimize the uncompressed mode to avoid moving and allocating the data twice
-      // TODO also implement a unit test
       makeCompressed();
 
       StorageIndex k = 0;
@@ -532,7 +538,12 @@ class SparseMatrix
     }
 
     /** Resizes the matrix to a \a rows x \a cols matrix leaving old values untouched.
-      * \sa resizeNonZeros(Index), reserve(), setZero()
+      *
+      * If the sizes of the matrix are decreased, then the matrix is turned to \b uncompressed-mode
+      * and the storage of the out of bounds coefficients is kept and reserved.
+      * Call makeCompressed() to pack the entries and squeeze extra memory.
+      *
+      * \sa reserve(), setZero(), makeCompressed()
       */
     void conservativeResize(Index rows, Index cols) 
     {
@@ -600,7 +611,7 @@ class SparseMatrix
       * This function does not free the currently allocated memory. To release as much as memory as possible,
       * call \code mat.data().squeeze(); \endcode after resizing it.
       * 
-      * \sa resizeNonZeros(Index), reserve(), setZero()
+      * \sa reserve(), setZero()
       */
     void resize(Index rows, Index cols)
     {
@@ -627,7 +638,6 @@ class SparseMatrix
       * Resize the nonzero vector to \a size */
     void resizeNonZeros(Index size)
     {
-      // TODO remove this function
       m_data.resize(size);
     }
 
@@ -665,8 +675,15 @@ class SparseMatrix
         YOU_MIXED_DIFFERENT_NUMERIC_TYPES__YOU_NEED_TO_USE_THE_CAST_METHOD_OF_MATRIXBASE_TO_CAST_NUMERIC_TYPES_EXPLICITLY)
       check_template_parameters();
       const bool needToTranspose = (Flags & RowMajorBit) != (internal::evaluator<OtherDerived>::Flags & RowMajorBit);
-      if (needToTranspose)  *this = other.derived();
-      else                  internal::call_assignment_no_alias(*this, other.derived());
+      if (needToTranspose)
+        *this = other.derived();
+      else
+      {
+        #ifdef EIGEN_SPARSE_CREATE_TEMPORARY_PLUGIN
+          EIGEN_SPARSE_CREATE_TEMPORARY_PLUGIN
+        #endif
+        internal::call_assignment_no_alias(*this, other.derived());
+      }
     }
     
     /** Constructs a sparse matrix from the sparse selfadjoint view \a other */
@@ -717,14 +734,17 @@ class SparseMatrix
       m_data.swap(other.m_data);
     }
 
-    /** Sets *this to the identity matrix */
+    /** Sets *this to the identity matrix.
+      * This function also turns the matrix into compressed mode, and drop any reserved memory. */
     inline void setIdentity()
     {
       eigen_assert(rows() == cols() && "ONLY FOR SQUARED MATRICES");
       this->m_data.resize(rows());
-      Eigen::Map<IndexVector>(&this->m_data.index(0), rows()).setLinSpaced(0, StorageIndex(rows()-1));
-      Eigen::Map<ScalarVector>(&this->m_data.value(0), rows()).setOnes();
+      Eigen::Map<IndexVector>(this->m_data.indexPtr(), rows()).setLinSpaced(0, StorageIndex(rows()-1));
+      Eigen::Map<ScalarVector>(this->m_data.valuePtr(), rows()).setOnes();
       Eigen::Map<IndexVector>(this->m_outerIndex, rows()+1).setLinSpaced(0, StorageIndex(rows()));
+      std::free(m_innerNonZeros);
+      m_innerNonZeros = 0;
     }
     inline SparseMatrix& operator=(const SparseMatrix& other)
     {
@@ -883,10 +903,9 @@ private:
 
 namespace internal {
 
-template<typename InputIterator, typename SparseMatrixType>
-void set_from_triplets(const InputIterator& begin, const InputIterator& end, SparseMatrixType& mat, int Options = 0)
+template<typename InputIterator, typename SparseMatrixType, typename DupFunctor>
+void set_from_triplets(const InputIterator& begin, const InputIterator& end, SparseMatrixType& mat, DupFunctor dup_func)
 {
-  EIGEN_UNUSED_VARIABLE(Options);
   enum { IsRowMajor = SparseMatrixType::IsRowMajor };
   typedef typename SparseMatrixType::Scalar Scalar;
   typedef typename SparseMatrixType::StorageIndex StorageIndex;
@@ -909,7 +928,7 @@ void set_from_triplets(const InputIterator& begin, const InputIterator& end, Spa
       trMat.insertBackUncompressed(it->row(),it->col()) = it->value();
 
     // pass 3:
-    trMat.sumupDuplicates();
+    trMat.collapseDuplicates(dup_func);
   }
 
   // pass 4: transposed copy -> implicit sorting
@@ -960,12 +979,29 @@ template<typename Scalar, int _Options, typename _Index>
 template<typename InputIterators>
 void SparseMatrix<Scalar,_Options,_Index>::setFromTriplets(const InputIterators& begin, const InputIterators& end)
 {
-  internal::set_from_triplets(begin, end, *this);
+  internal::set_from_triplets<InputIterators, SparseMatrix<Scalar,_Options,_Index> >(begin, end, *this, internal::scalar_sum_op<Scalar,Scalar>());
+}
+
+/** The same as setFromTriplets but when duplicates are met the functor \a dup_func is applied:
+  * \code
+  * value = dup_func(OldValue, NewValue)
+  * \endcode 
+  * Here is a C++11 example keeping the latest entry only:
+  * \code
+  * mat.setFromTriplets(triplets.begin(), triplets.end(), [] (const Scalar&,const Scalar &b) { return b; });
+  * \endcode
+  */
+template<typename Scalar, int _Options, typename _Index>
+template<typename InputIterators,typename DupFunctor>
+void SparseMatrix<Scalar,_Options,_Index>::setFromTriplets(const InputIterators& begin, const InputIterators& end, DupFunctor dup_func)
+{
+  internal::set_from_triplets<InputIterators, SparseMatrix<Scalar,_Options,_Index>, DupFunctor>(begin, end, *this, dup_func);
 }
 
 /** \internal */
 template<typename Scalar, int _Options, typename _Index>
-void SparseMatrix<Scalar,_Options,_Index>::sumupDuplicates()
+template<typename DupFunctor>
+void SparseMatrix<Scalar,_Options,_Index>::collapseDuplicates(DupFunctor dup_func)
 {
   eigen_assert(!isCompressed());
   // TODO, in practice we should be able to use m_innerNonZeros for that task
@@ -983,7 +1019,7 @@ void SparseMatrix<Scalar,_Options,_Index>::sumupDuplicates()
       if(wi(i)>=start)
       {
         // we already meet this entry => accumulate it
-        m_data.value(wi(i)) += m_data.value(k);
+        m_data.value(wi(i)) = dup_func(m_data.value(wi(i)), m_data.value(k));
       }
       else
       {
@@ -1017,6 +1053,9 @@ EIGEN_DONT_INLINE SparseMatrix<Scalar,_Options,_Index>& SparseMatrix<Scalar,_Opt
   const bool needToTranspose = (Flags & RowMajorBit) != (internal::evaluator<OtherDerived>::Flags & RowMajorBit);
   if (needToTranspose)
   {
+    #ifdef EIGEN_SPARSE_TRANSPOSED_COPY_PLUGIN
+      EIGEN_SPARSE_TRANSPOSED_COPY_PLUGIN
+    #endif
     // two passes algorithm:
     //  1 - compute the number of coeffs per dest inner vector
     //  2 - do the actual copy/eval
@@ -1041,7 +1080,7 @@ EIGEN_DONT_INLINE SparseMatrix<Scalar,_Options,_Index>& SparseMatrix<Scalar,_Opt
     IndexVector positions(dest.outerSize());
     for (Index j=0; j<dest.outerSize(); ++j)
     {
-      Index tmp = dest.m_outerIndex[j];
+      StorageIndex tmp = dest.m_outerIndex[j];
       dest.m_outerIndex[j] = count;
       positions[j] = count;
       count += tmp;
@@ -1100,6 +1139,14 @@ typename SparseMatrix<_Scalar,_Options,_Index>::Scalar& SparseMatrix<_Scalar,_Op
       StorageIndex end = convert_index(m_data.allocatedSize());
       for(Index j=1; j<=m_outerSize; ++j)
         m_outerIndex[j] = end;
+    }
+    else
+    {
+      // turn the matrix into non-compressed mode
+      m_innerNonZeros = static_cast<StorageIndex*>(std::malloc(m_outerSize * sizeof(StorageIndex)));
+      if(!m_innerNonZeros) internal::throw_std_bad_alloc();
+      for(Index j=0; j<m_outerSize; ++j)
+        m_innerNonZeros[j] = m_outerIndex[j+1]-m_outerIndex[j];
     }
   }
   
@@ -1179,7 +1226,7 @@ typename SparseMatrix<_Scalar,_Options,_Index>::Scalar& SparseMatrix<_Scalar,_Op
   {
     // make sure the matrix is compatible to random un-compressed insertion:
     m_data.resize(m_data.allocatedSize());
-    this->reserveInnerVectors(Array<StorageIndex,Dynamic,1>::Constant(2*m_outerSize, convert_index(m_outerSize)));
+    this->reserveInnerVectors(Array<StorageIndex,Dynamic,1>::Constant(m_outerSize, 2));
   }
   
   return insertUncompressed(row,col);

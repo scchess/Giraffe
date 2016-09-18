@@ -62,6 +62,8 @@ namespace internal {
   * \tparam _OrderingType The fill-reducing ordering method. See the \link OrderingMethods_Module 
   *  OrderingMethods \endlink module for the list of built-in and external ordering methods.
   * 
+  * \implsparsesolverconcept
+  *
   * \warning The input sparse matrix A must be in compressed mode (see SparseMatrix::makeCompressed()).
   * 
   */
@@ -82,6 +84,12 @@ class SparseQR : public SparseSolverBase<SparseQR<_MatrixType,_OrderingType> >
     typedef Matrix<StorageIndex, Dynamic, 1> IndexVector;
     typedef Matrix<Scalar, Dynamic, 1> ScalarVector;
     typedef PermutationMatrix<Dynamic, Dynamic, StorageIndex> PermutationType;
+
+    enum {
+      ColsAtCompileTime = MatrixType::ColsAtCompileTime,
+      MaxColsAtCompileTime = MatrixType::MaxColsAtCompileTime
+    };
+    
   public:
     SparseQR () :  m_analysisIsok(false), m_lastError(""), m_useDefaultThreshold(true),m_isQSorted(false),m_isEtreeOk(false)
     { }
@@ -120,6 +128,17 @@ class SparseQR : public SparseSolverBase<SparseQR<_MatrixType,_OrderingType> >
     inline Index cols() const { return m_pmat.cols();}
     
     /** \returns a const reference to the \b sparse upper triangular matrix R of the QR factorization.
+      * \warning The entries of the returned matrix are not sorted. This means that using it in algorithms
+      *          expecting sorted entries will fail. This include random coefficient accesses (SpaseMatrix::coeff()),
+      *          and coefficient-wise operations. Matrix products and triangular solves are fine though.
+      *
+      * To sort the entries, you can assign it to a row-major matrix, and if a column-major matrix
+      * is required, you can copy it again:
+      * \code
+      * SparseMatrix<double>          R  = qr.matrixR();  // column-major, not sorted!
+      * SparseMatrix<double,RowMajor> Rr = qr.matrixR();  // row-major, sorted
+      * SparseMatrix<double>          Rc = Rr;            // column-major, sorted
+      * \endcode
       */
     const QRMatrixType& matrixR() const { return m_R; }
     
@@ -683,16 +702,15 @@ struct evaluator_traits<SparseQRMatrixQReturnType<SparseQRType> >
   typedef typename SparseQRType::MatrixType MatrixType;
   typedef typename storage_kind_to_evaluator_kind<typename MatrixType::StorageKind>::Kind Kind;
   typedef SparseShape Shape;
-  static const int AssumeAliasing = 0;
 };
 
 template< typename DstXprType, typename SparseQRType>
-struct Assignment<DstXprType, SparseQRMatrixQReturnType<SparseQRType>, internal::assign_op<typename DstXprType::Scalar>, Sparse2Sparse>
+struct Assignment<DstXprType, SparseQRMatrixQReturnType<SparseQRType>, internal::assign_op<typename DstXprType::Scalar,typename DstXprType::Scalar>, Sparse2Sparse>
 {
   typedef SparseQRMatrixQReturnType<SparseQRType> SrcXprType;
   typedef typename DstXprType::Scalar Scalar;
   typedef typename DstXprType::StorageIndex StorageIndex;
-  static void run(DstXprType &dst, const SrcXprType &src, const internal::assign_op<Scalar> &/*func*/)
+  static void run(DstXprType &dst, const SrcXprType &src, const internal::assign_op<Scalar,Scalar> &/*func*/)
   {
     typename DstXprType::PlainObject idMat(src.m_qr.rows(), src.m_qr.rows());
     idMat.setIdentity();
@@ -703,12 +721,12 @@ struct Assignment<DstXprType, SparseQRMatrixQReturnType<SparseQRType>, internal:
 };
 
 template< typename DstXprType, typename SparseQRType>
-struct Assignment<DstXprType, SparseQRMatrixQReturnType<SparseQRType>, internal::assign_op<typename DstXprType::Scalar>, Sparse2Dense>
+struct Assignment<DstXprType, SparseQRMatrixQReturnType<SparseQRType>, internal::assign_op<typename DstXprType::Scalar,typename DstXprType::Scalar>, Sparse2Dense>
 {
   typedef SparseQRMatrixQReturnType<SparseQRType> SrcXprType;
   typedef typename DstXprType::Scalar Scalar;
   typedef typename DstXprType::StorageIndex StorageIndex;
-  static void run(DstXprType &dst, const SrcXprType &src, const internal::assign_op<Scalar> &/*func*/)
+  static void run(DstXprType &dst, const SrcXprType &src, const internal::assign_op<Scalar,Scalar> &/*func*/)
   {
     dst = src.m_qr.matrixQ() * DstXprType::Identity(src.m_qr.rows(), src.m_qr.rows());
   }

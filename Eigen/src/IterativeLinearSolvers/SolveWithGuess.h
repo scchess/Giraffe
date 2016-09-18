@@ -44,6 +44,7 @@ public:
   typedef typename internal::traits<SolveWithGuess>::Scalar Scalar;
   typedef typename internal::traits<SolveWithGuess>::PlainObject PlainObject;
   typedef typename internal::generic_xpr_base<SolveWithGuess<Decomposition,RhsType,GuessType>, MatrixXpr, typename internal::traits<RhsType>::StorageKind>::type Base;
+  typedef typename internal::ref_selector<SolveWithGuess>::type Nested;
   
   SolveWithGuess(const Decomposition &dec, const RhsType &rhs, const GuessType &guess)
     : m_dec(dec), m_rhs(rhs), m_guess(guess)
@@ -71,20 +72,18 @@ namespace internal {
 // Evaluator of SolveWithGuess -> eval into a temporary
 template<typename Decomposition, typename RhsType, typename GuessType>
 struct evaluator<SolveWithGuess<Decomposition,RhsType, GuessType> >
-  : public evaluator<typename SolveWithGuess<Decomposition,RhsType,GuessType>::PlainObject>::type
+  : public evaluator<typename SolveWithGuess<Decomposition,RhsType,GuessType>::PlainObject>
 {
   typedef SolveWithGuess<Decomposition,RhsType,GuessType> SolveType;
   typedef typename SolveType::PlainObject PlainObject;
-  typedef typename evaluator<PlainObject>::type Base;
-  
-  typedef evaluator type;
-  typedef evaluator nestedType;
+  typedef evaluator<PlainObject> Base;
 
   evaluator(const SolveType& solve)
     : m_result(solve.rows(), solve.cols())
   {
     ::new (static_cast<Base*>(this)) Base(m_result);
-    solve.dec()._solve_with_guess_impl(solve.rhs(), m_result, solve().guess());
+    m_result = solve.guess();
+    solve.dec()._solve_with_guess_impl(solve.rhs(), m_result);
   }
   
 protected:  
@@ -94,10 +93,10 @@ protected:
 // Specialization for "dst = dec.solveWithGuess(rhs)"
 // NOTE we need to specialize it for Dense2Dense to avoid ambiguous specialization error and a Sparse2Sparse specialization must exist somewhere
 template<typename DstXprType, typename DecType, typename RhsType, typename GuessType, typename Scalar>
-struct Assignment<DstXprType, SolveWithGuess<DecType,RhsType,GuessType>, internal::assign_op<Scalar>, Dense2Dense, Scalar>
+struct Assignment<DstXprType, SolveWithGuess<DecType,RhsType,GuessType>, internal::assign_op<Scalar,Scalar>, Dense2Dense>
 {
   typedef SolveWithGuess<DecType,RhsType,GuessType> SrcXprType;
-  static void run(DstXprType &dst, const SrcXprType &src, const internal::assign_op<Scalar> &)
+  static void run(DstXprType &dst, const SrcXprType &src, const internal::assign_op<Scalar,Scalar> &)
   {
     // FIXME shall we resize dst here?
     dst = src.guess();

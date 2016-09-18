@@ -43,7 +43,7 @@ struct default_packet_traits
 {
   enum {
     HasHalfPacket = 0,
-    
+
     HasAdd    = 1,
     HasSub    = 1,
     HasMul    = 1,
@@ -62,7 +62,8 @@ struct default_packet_traits
     HasRsqrt  = 0,
     HasExp    = 0,
     HasLog    = 0,
-    HasLog10    = 0,
+    HasLog1p  = 0,
+    HasLog10  = 0,
     HasPow    = 0,
 
     HasSin    = 0,
@@ -71,13 +72,24 @@ struct default_packet_traits
     HasASin   = 0,
     HasACos   = 0,
     HasATan   = 0,
-    HasSinh    = 0,
-    HasCosh    = 0,
-    HasTanh    = 0,
+    HasSinh   = 0,
+    HasCosh   = 0,
+    HasTanh   = 0,
+    HasLGamma = 0,
+    HasDiGamma = 0,
+    HasZeta = 0,
+    HasPolygamma = 0,
+    HasErf = 0,
+    HasErfc = 0,
+    HasIGamma = 0,
+    HasIGammac = 0,
+    HasBetaInc = 0,
 
     HasRound  = 0,
     HasFloor  = 0,
-    HasCeil   = 0
+    HasCeil   = 0,
+
+    HasSign   = 0
   };
 };
 
@@ -128,6 +140,11 @@ pcast(const SrcPacket& a, const SrcPacket& /*b*/) {
   return static_cast<TgtPacket>(a);
 }
 
+template <typename SrcPacket, typename TgtPacket>
+EIGEN_DEVICE_FUNC inline TgtPacket
+pcast(const SrcPacket& a, const SrcPacket& /*b*/, const SrcPacket& /*c*/, const SrcPacket& /*d*/) {
+  return static_cast<TgtPacket>(a);
+}
 
 /** \internal \returns a + b (coeff-wise) */
 template<typename Packet> EIGEN_DEVICE_FUNC inline Packet
@@ -261,8 +278,8 @@ inline void pbroadcast2(const typename unpacket_traits<Packet>::type *a,
 }
 
 /** \internal \brief Returns a packet with coefficients (a,a+1,...,a+packet_size-1). */
-template<typename Scalar> inline typename packet_traits<Scalar>::type
-plset(const Scalar& a) { return a; }
+template<typename Packet> inline Packet
+plset(const typename unpacket_traits<Packet>::type& a) { return a; }
 
 /** \internal copy the packet \a from to \a *to, \a to must be 16 bytes aligned */
 template<typename Scalar, typename Packet> EIGEN_DEVICE_FUNC inline void pstore(Scalar* to, const Packet& from)
@@ -279,9 +296,17 @@ template<typename Scalar, typename Packet> EIGEN_DEVICE_FUNC inline void pstoreu
  { pstore(to, from); }
 
 /** \internal tries to do cache prefetching of \a addr */
-template<typename Scalar> inline void prefetch(const Scalar* addr)
+template<typename Scalar> EIGEN_DEVICE_FUNC inline void prefetch(const Scalar* addr)
 {
-#if !EIGEN_COMP_MSVC
+#ifdef __CUDA_ARCH__
+#if defined(__LP64__)
+  // 64-bit pointer operand constraint for inlined asm
+  asm(" prefetch.L1 [ %1 ];" : "=l"(addr) : "l"(addr));
+#else
+  // 32-bit pointer operand constraint for inlined asm
+  asm(" prefetch.L1 [ %1 ];" : "=r"(addr) : "r"(addr));
+#endif
+#elif (!EIGEN_COMP_MSVC) && (EIGEN_COMP_GNUC || EIGEN_COMP_CLANG || EIGEN_COMP_ICC)
   __builtin_prefetch(addr);
 #endif
 }
@@ -322,22 +347,6 @@ template<typename Packet> EIGEN_DEVICE_FUNC inline typename unpacket_traits<Pack
 /** \internal \returns the reversed elements of \a a*/
 template<typename Packet> EIGEN_DEVICE_FUNC inline Packet preverse(const Packet& a)
 { return a; }
-
-template<size_t offset, typename Packet>
-struct protate_impl
-{
-  // Empty so attempts to use this unimplemented path will fail to compile.
-  // Only specializations of this template should be used.
-};
-
-/** \internal \returns a packet with the coefficients rotated to the right in little-endian convention,
-  * by the given offset, e.g. for offset == 1:
-  *     (packet[3], packet[2], packet[1], packet[0]) becomes (packet[0], packet[3], packet[2], packet[1])
-  */
-template<size_t offset, typename Packet> EIGEN_DEVICE_FUNC inline Packet protate(const Packet& a)
-{
-  return offset ? protate_impl<offset, Packet>::run(a) : a;
-}
 
 /** \internal \returns \a a with real and imaginary part flipped (for complex type only) */
 template<typename Packet> EIGEN_DEVICE_FUNC inline Packet pcplxflip(const Packet& a)
@@ -396,6 +405,10 @@ Packet pexp(const Packet& a) { using std::exp; return exp(a); }
 template<typename Packet> EIGEN_DECLARE_FUNCTION_ALLOWING_MULTIPLE_DEFINITIONS
 Packet plog(const Packet& a) { using std::log; return log(a); }
 
+/** \internal \returns the log1p of \a a (coeff-wise) */
+template<typename Packet> EIGEN_DECLARE_FUNCTION_ALLOWING_MULTIPLE_DEFINITIONS
+Packet plog1p(const Packet& a) { return numext::log1p(a); }
+
 /** \internal \returns the log10 of \a a (coeff-wise) */
 template<typename Packet> EIGEN_DECLARE_FUNCTION_ALLOWING_MULTIPLE_DEFINITIONS
 Packet plog10(const Packet& a) { using std::log10; return log10(a); }
@@ -442,22 +455,22 @@ pmadd(const Packet&  a,
 { return padd(pmul(a, b),c); }
 
 /** \internal \returns a packet version of \a *from.
-  * If LoadMode equals #Aligned, \a from must be 16 bytes aligned */
-template<typename Packet, int LoadMode>
+  * The pointer \a from must be aligned on a \a Alignment bytes boundary. */
+template<typename Packet, int Alignment>
 EIGEN_DEVICE_FUNC EIGEN_ALWAYS_INLINE Packet ploadt(const typename unpacket_traits<Packet>::type* from)
 {
-  if(LoadMode == Aligned)
+  if(Alignment >= unpacket_traits<Packet>::alignment)
     return pload<Packet>(from);
   else
     return ploadu<Packet>(from);
 }
 
 /** \internal copy the packet \a from to \a *to.
-  * If StoreMode equals #Aligned, \a to must be 16 bytes aligned */
-template<typename Scalar, typename Packet, int LoadMode>
+  * The pointer \a from must be aligned on a \a Alignment bytes boundary. */
+template<typename Scalar, typename Packet, int Alignment>
 EIGEN_DEVICE_FUNC EIGEN_ALWAYS_INLINE void pstoret(Scalar* to, const Packet& from)
 {
-  if(LoadMode == Aligned)
+  if(Alignment >= unpacket_traits<Packet>::alignment)
     pstore(to, from);
   else
     pstoreu(to, from);
