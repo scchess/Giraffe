@@ -1,7 +1,7 @@
 // This file is part of Eigen, a lightweight C++ template library
 // for linear algebra.
 //
-// Copyright (C) 2008-2014 Gael Guennebaud <gael.guennebaud@inria.fr>
+// Copyright (C) 2008-2015 Gael Guennebaud <gael.guennebaud@inria.fr>
 //
 // This Source Code Form is subject to the terms of the Mozilla
 // Public License v. 2.0. If a copy of the MPL was not distributed
@@ -30,7 +30,7 @@ struct sparse_time_dense_product_impl<SparseLhsType,DenseRhsType,DenseResType, t
   typedef typename internal::remove_all<DenseRhsType>::type Rhs;
   typedef typename internal::remove_all<DenseResType>::type Res;
   typedef typename evaluator<Lhs>::InnerIterator LhsInnerIterator;
-  typedef typename evaluator<Lhs>::type LhsEval;
+  typedef evaluator<Lhs> LhsEval;
   static void run(const SparseLhsType& lhs, const DenseRhsType& rhs, DenseResType& res, const typename Res::Scalar& alpha)
   {
     LhsEval lhsEval(lhs);
@@ -46,9 +46,9 @@ struct sparse_time_dense_product_impl<SparseLhsType,DenseRhsType,DenseResType, t
 #ifdef EIGEN_HAS_OPENMP
       // This 20000 threshold has been found experimentally on 2D and 3D Poisson problems.
       // It basically represents the minimal amount of work to be done to be worth it.
-      if(threads>1 && lhs.nonZeros() > 20000)
+      if(threads>1 && lhsEval.nonZerosEstimate() > 20000)
       {
-        #pragma omp parallel for schedule(static) num_threads(threads)
+        #pragma omp parallel for schedule(dynamic,(n+threads*4-1)/(threads*4)) num_threads(threads)
         for(Index i=0; i<n; ++i)
           processRow(lhsEval,rhs,res,alpha,i,c);
       }
@@ -72,14 +72,16 @@ struct sparse_time_dense_product_impl<SparseLhsType,DenseRhsType,DenseResType, t
 };
 
 // FIXME: what is the purpose of the following specialization? Is it for the BlockedSparse format?
-template<typename T1, typename T2/*, int _Options, typename _StrideType*/>
-struct scalar_product_traits<T1, Ref<T2/*, _Options, _StrideType*/> >
-{
-  enum {
-    Defined = 1
-  };
-  typedef typename CwiseUnaryOp<scalar_multiple2_op<T1, typename T2::Scalar>, T2>::PlainObject ReturnType;
-};
+// -> let's disable it for now as it is conflicting with generic scalar*matrix and matrix*scalar operators
+// template<typename T1, typename T2/*, int _Options, typename _StrideType*/>
+// struct ScalarBinaryOpTraits<T1, Ref<T2/*, _Options, _StrideType*/> >
+// {
+//   enum {
+//     Defined = 1
+//   };
+//   typedef typename CwiseUnaryOp<scalar_multiple2_op<T1, typename T2::Scalar>, T2>::PlainObject ReturnType;
+// };
+
 template<typename SparseLhsType, typename DenseRhsType, typename DenseResType, typename AlphaType>
 struct sparse_time_dense_product_impl<SparseLhsType,DenseRhsType,DenseResType, AlphaType, ColMajor, true>
 {
@@ -89,13 +91,13 @@ struct sparse_time_dense_product_impl<SparseLhsType,DenseRhsType,DenseResType, A
   typedef typename evaluator<Lhs>::InnerIterator LhsInnerIterator;
   static void run(const SparseLhsType& lhs, const DenseRhsType& rhs, DenseResType& res, const AlphaType& alpha)
   {
-    typename evaluator<Lhs>::type lhsEval(lhs);
+    evaluator<Lhs> lhsEval(lhs);
     for(Index c=0; c<rhs.cols(); ++c)
     {
       for(Index j=0; j<lhs.outerSize(); ++j)
       {
 //        typename Res::Scalar rhs_j = alpha * rhs.coeff(j,c);
-        typename internal::scalar_product_traits<AlphaType, typename Rhs::Scalar>::ReturnType rhs_j(alpha * rhs.coeff(j,c));
+        typename ScalarBinaryOpTraits<AlphaType, typename Rhs::Scalar>::ReturnType rhs_j(alpha * rhs.coeff(j,c));
         for(LhsInnerIterator it(lhsEval,j); it ;++it)
           res.coeffRef(it.index(),c) += it.value() * rhs_j;
       }
@@ -112,7 +114,7 @@ struct sparse_time_dense_product_impl<SparseLhsType,DenseRhsType,DenseResType, t
   typedef typename evaluator<Lhs>::InnerIterator LhsInnerIterator;
   static void run(const SparseLhsType& lhs, const DenseRhsType& rhs, DenseResType& res, const typename Res::Scalar& alpha)
   {
-    typename evaluator<Lhs>::type lhsEval(lhs);
+    evaluator<Lhs> lhsEval(lhs);
     for(Index j=0; j<lhs.outerSize(); ++j)
     {
       typename Res::RowXpr res_j(res.row(j));
@@ -131,7 +133,7 @@ struct sparse_time_dense_product_impl<SparseLhsType,DenseRhsType,DenseResType, t
   typedef typename evaluator<Lhs>::InnerIterator LhsInnerIterator;
   static void run(const SparseLhsType& lhs, const DenseRhsType& rhs, DenseResType& res, const typename Res::Scalar& alpha)
   {
-    typename evaluator<Lhs>::type lhsEval(lhs);
+    evaluator<Lhs> lhsEval(lhs);
     for(Index j=0; j<lhs.outerSize(); ++j)
     {
       typename Rhs::ConstRowXpr rhs_j(rhs.row(j));
@@ -160,8 +162,8 @@ struct generic_product_impl<Lhs, Rhs, SparseShape, DenseShape, ProductType>
   template<typename Dest>
   static void scaleAndAddTo(Dest& dst, const Lhs& lhs, const Rhs& rhs, const Scalar& alpha)
   {
-    typedef typename nested_eval<Lhs,Dynamic>::type LhsNested;
-    typedef typename nested_eval<Rhs,Dynamic>::type RhsNested;
+    typedef typename nested_eval<Lhs,((Rhs::Flags&RowMajorBit)==0) ? 1 : Rhs::ColsAtCompileTime>::type LhsNested;
+    typedef typename nested_eval<Rhs,((Lhs::Flags&RowMajorBit)==0) ? 1 : Dynamic>::type RhsNested;
     LhsNested lhsNested(lhs);
     RhsNested rhsNested(rhs);
     internal::sparse_time_dense_product(lhsNested, rhsNested, dst, alpha);
@@ -182,8 +184,8 @@ struct generic_product_impl<Lhs, Rhs, DenseShape, SparseShape, ProductType>
   template<typename Dst>
   static void scaleAndAddTo(Dst& dst, const Lhs& lhs, const Rhs& rhs, const Scalar& alpha)
   {
-    typedef typename nested_eval<Lhs,Dynamic>::type LhsNested;
-    typedef typename nested_eval<Rhs,Dynamic>::type RhsNested;
+    typedef typename nested_eval<Lhs,((Rhs::Flags&RowMajorBit)==0) ? Dynamic : 1>::type LhsNested;
+    typedef typename nested_eval<Rhs,((Lhs::Flags&RowMajorBit)==RowMajorBit) ? 1 : Lhs::RowsAtCompileTime>::type RhsNested;
     LhsNested lhsNested(lhs);
     RhsNested rhsNested(rhs);
     
@@ -213,15 +215,15 @@ protected:
   typedef typename conditional<is_same<typename internal::traits<Lhs1>::StorageKind,Sparse>::value,
             Lhs1 const&, SparseView<Lhs1> >::type LhsArg;
             
-  typedef typename evaluator<ActualLhs>::type LhsEval;
-  typedef typename evaluator<ActualRhs>::type RhsEval;
+  typedef evaluator<ActualLhs> LhsEval;
+  typedef evaluator<ActualRhs> RhsEval;
   typedef typename evaluator<ActualLhs>::InnerIterator LhsIterator;
   typedef typename ProdXprType::Scalar Scalar;
   
 public:
   enum {
     Flags = NeedToTranspose ? RowMajorBit : 0,
-    CoeffReadCost = Dynamic
+    CoeffReadCost = HugeCost
   };
   
   class InnerIterator : public LhsIterator
@@ -263,22 +265,26 @@ public:
   
   sparse_dense_outer_product_evaluator(const Lhs1 &lhs, const ActualRhs &rhs)
      : m_lhs(lhs), m_lhsXprImpl(m_lhs), m_rhsXprImpl(rhs)
-  {}
+  {
+    EIGEN_INTERNAL_CHECK_COST_VALUE(CoeffReadCost);
+  }
   
   // transpose case
   sparse_dense_outer_product_evaluator(const ActualRhs &rhs, const Lhs1 &lhs)
      : m_lhs(lhs), m_lhsXprImpl(m_lhs), m_rhsXprImpl(rhs)
-  {}
+  {
+    EIGEN_INTERNAL_CHECK_COST_VALUE(CoeffReadCost);
+  }
     
 protected:
   const LhsArg m_lhs;
-  typename evaluator<ActualLhs>::nestedType m_lhsXprImpl;
-  typename evaluator<ActualRhs>::nestedType m_rhsXprImpl;
+  evaluator<ActualLhs> m_lhsXprImpl;
+  evaluator<ActualRhs> m_rhsXprImpl;
 };
 
 // sparse * dense outer product
 template<typename Lhs, typename Rhs>
-struct product_evaluator<Product<Lhs, Rhs, DefaultProduct>, OuterProduct, SparseShape, DenseShape, typename traits<Lhs>::Scalar, typename traits<Rhs>::Scalar> 
+struct product_evaluator<Product<Lhs, Rhs, DefaultProduct>, OuterProduct, SparseShape, DenseShape>
   : sparse_dense_outer_product_evaluator<Lhs,Rhs, Lhs::IsRowMajor>
 {
   typedef sparse_dense_outer_product_evaluator<Lhs,Rhs, Lhs::IsRowMajor> Base;
@@ -293,7 +299,7 @@ struct product_evaluator<Product<Lhs, Rhs, DefaultProduct>, OuterProduct, Sparse
 };
 
 template<typename Lhs, typename Rhs>
-struct product_evaluator<Product<Lhs, Rhs, DefaultProduct>, OuterProduct, DenseShape, SparseShape, typename traits<Lhs>::Scalar, typename traits<Rhs>::Scalar> 
+struct product_evaluator<Product<Lhs, Rhs, DefaultProduct>, OuterProduct, DenseShape, SparseShape>
   : sparse_dense_outer_product_evaluator<Lhs,Rhs, Rhs::IsRowMajor>
 {
   typedef sparse_dense_outer_product_evaluator<Lhs,Rhs, Rhs::IsRowMajor> Base;

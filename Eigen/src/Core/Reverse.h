@@ -14,20 +14,6 @@
 
 namespace Eigen { 
 
-/** \class Reverse
-  * \ingroup Core_Module
-  *
-  * \brief Expression of the reverse of a vector or matrix
-  *
-  * \param MatrixType the type of the object of which we are taking the reverse
-  *
-  * This class represents an expression of the reverse of a vector.
-  * It is the return type of MatrixBase::reverse() and VectorwiseOp::reverse()
-  * and most of the time this is the only way it is used.
-  *
-  * \sa MatrixBase::reverse(), VectorwiseOp::reverse()
-  */
-
 namespace internal {
 
 template<typename MatrixType, int Direction>
@@ -48,18 +34,32 @@ struct traits<Reverse<MatrixType, Direction> >
   };
 };
 
-template<typename PacketScalar, bool ReversePacket> struct reverse_packet_cond
+template<typename PacketType, bool ReversePacket> struct reverse_packet_cond
 {
-  static inline PacketScalar run(const PacketScalar& x) { return preverse(x); }
+  static inline PacketType run(const PacketType& x) { return preverse(x); }
 };
 
-template<typename PacketScalar> struct reverse_packet_cond<PacketScalar,false>
+template<typename PacketType> struct reverse_packet_cond<PacketType,false>
 {
-  static inline PacketScalar run(const PacketScalar& x) { return x; }
+  static inline PacketType run(const PacketType& x) { return x; }
 };
 
 } // end namespace internal 
 
+/** \class Reverse
+  * \ingroup Core_Module
+  *
+  * \brief Expression of the reverse of a vector or matrix
+  *
+  * \tparam MatrixType the type of the object of which we are taking the reverse
+  * \tparam Direction defines the direction of the reverse operation, can be Vertical, Horizontal, or BothDirections
+  *
+  * This class represents an expression of the reverse of a vector.
+  * It is the return type of MatrixBase::reverse() and VectorwiseOp::reverse()
+  * and most of the time this is the only way it is used.
+  *
+  * \sa MatrixBase::reverse(), VectorwiseOp::reverse()
+  */
 template<typename MatrixType, int Direction> class Reverse
   : public internal::dense_xpr_base< Reverse<MatrixType, Direction> >::type
 {
@@ -120,13 +120,8 @@ DenseBase<Derived>::reverse()
   return ReverseReturnType(derived());
 }
 
-/** This is the const version of reverse(). */
-template<typename Derived>
-inline const typename DenseBase<Derived>::ConstReverseReturnType
-DenseBase<Derived>::reverse() const
-{
-  return ConstReverseReturnType(derived());
-}
+
+//reverse const overload moved DenseBase.h due to a CUDA compiler bug
 
 /** This is the "in place" version of reverse: it reverses \c *this.
   *

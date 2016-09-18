@@ -43,7 +43,7 @@ template<> struct is_arithmetic<__m256d> { enum { value = true }; };
   const Packet4d p4d_##NAME = pset1<Packet4d>(X)
 
 #define _EIGEN_DECLARE_CONST_Packet8f_FROM_INT(NAME,X) \
-  const Packet8f p8f_##NAME = (__m256)pset1<Packet8i>(X)
+  const Packet8f p8f_##NAME = _mm256_castsi256_ps(pset1<Packet8i>(X))
 
 #define _EIGEN_DECLARE_CONST_Packet8i(NAME,X) \
   const Packet8i p8i_##NAME = pset1<Packet8i>(X)
@@ -60,13 +60,17 @@ template<> struct packet_traits<float>  : default_packet_traits
     HasHalfPacket = 1,
 
     HasDiv  = 1,
-    HasSin  = 1,
+    HasSin  = EIGEN_FAST_MATH,
     HasCos  = 0,
     HasLog  = 1,
     HasExp  = 1,
     HasSqrt = 1,
     HasRsqrt = 1,
-    HasBlend = 1
+    HasTanh  = EIGEN_FAST_MATH,
+    HasBlend = 1,
+    HasRound = 1,
+    HasFloor = 1,
+    HasCeil = 1
   };
 };
 template<> struct packet_traits<double> : default_packet_traits
@@ -83,9 +87,15 @@ template<> struct packet_traits<double> : default_packet_traits
     HasExp  = 1,
     HasSqrt = 1,
     HasRsqrt = 1,
-    HasBlend = 1
+    HasBlend = 1,
+    HasRound = 1,
+    HasFloor = 1,
+    HasCeil = 1
   };
 };
+
+template<> struct scalar_div_cost<float,true> { enum { value = 14 }; };
+template<> struct scalar_div_cost<double,true> { enum { value = 16 }; };
 
 /* Proper support for integers is only provided by AVX2. In the meantime, we'll
    use SSE instructions and packets to deal with integers.
@@ -100,9 +110,9 @@ template<> struct packet_traits<int>    : default_packet_traits
 };
 */
 
-template<> struct unpacket_traits<Packet8f> { typedef float  type; typedef Packet4f half; enum {size=8}; };
-template<> struct unpacket_traits<Packet4d> { typedef double type; typedef Packet2d half; enum {size=4}; };
-template<> struct unpacket_traits<Packet8i> { typedef int    type; typedef Packet4i half; enum {size=8}; };
+template<> struct unpacket_traits<Packet8f> { typedef float  type; typedef Packet4f half; enum {size=8, alignment=Aligned32}; };
+template<> struct unpacket_traits<Packet4d> { typedef double type; typedef Packet2d half; enum {size=4, alignment=Aligned32}; };
+template<> struct unpacket_traits<Packet8i> { typedef int    type; typedef Packet4i half; enum {size=8, alignment=Aligned32}; };
 
 template<> EIGEN_STRONG_INLINE Packet8f pset1<Packet8f>(const float&  from) { return _mm256_set1_ps(from); }
 template<> EIGEN_STRONG_INLINE Packet4d pset1<Packet4d>(const double& from) { return _mm256_set1_pd(from); }
@@ -111,8 +121,8 @@ template<> EIGEN_STRONG_INLINE Packet8i pset1<Packet8i>(const int&    from) { re
 template<> EIGEN_STRONG_INLINE Packet8f pload1<Packet8f>(const float*  from) { return _mm256_broadcast_ss(from); }
 template<> EIGEN_STRONG_INLINE Packet4d pload1<Packet4d>(const double* from) { return _mm256_broadcast_sd(from); }
 
-template<> EIGEN_STRONG_INLINE Packet8f plset<float>(const float& a) { return _mm256_add_ps(_mm256_set1_ps(a), _mm256_set_ps(7.0,6.0,5.0,4.0,3.0,2.0,1.0,0.0)); }
-template<> EIGEN_STRONG_INLINE Packet4d plset<double>(const double& a) { return _mm256_add_pd(_mm256_set1_pd(a), _mm256_set_pd(3.0,2.0,1.0,0.0)); }
+template<> EIGEN_STRONG_INLINE Packet8f plset<Packet8f>(const float& a) { return _mm256_add_ps(_mm256_set1_ps(a), _mm256_set_ps(7.0,6.0,5.0,4.0,3.0,2.0,1.0,0.0)); }
+template<> EIGEN_STRONG_INLINE Packet4d plset<Packet4d>(const double& a) { return _mm256_add_pd(_mm256_set1_pd(a), _mm256_set_pd(3.0,2.0,1.0,0.0)); }
 
 template<> EIGEN_STRONG_INLINE Packet8f padd<Packet8f>(const Packet8f& a, const Packet8f& b) { return _mm256_add_ps(a,b); }
 template<> EIGEN_STRONG_INLINE Packet4d padd<Packet4d>(const Packet4d& a, const Packet4d& b) { return _mm256_add_pd(a,b); }
@@ -146,7 +156,7 @@ template<> EIGEN_STRONG_INLINE Packet8i pdiv<Packet8i>(const Packet8i& /*a*/, co
 
 #ifdef __FMA__
 template<> EIGEN_STRONG_INLINE Packet8f pmadd(const Packet8f& a, const Packet8f& b, const Packet8f& c) {
-#if EIGEN_COMP_GNUC || EIGEN_COMP_CLANG
+#if ( EIGEN_COMP_GNUC_STRICT || (EIGEN_COMP_CLANG && (EIGEN_COMP_CLANG<308)) )
   // clang stupidly generates a vfmadd213ps instruction plus some vmovaps on registers,
   // and gcc stupidly generates a vfmadd132ps instruction,
   // so let's enforce it to generate a vfmadd231ps instruction since the most common use case is to accumulate
@@ -159,7 +169,7 @@ template<> EIGEN_STRONG_INLINE Packet8f pmadd(const Packet8f& a, const Packet8f&
 #endif
 }
 template<> EIGEN_STRONG_INLINE Packet4d pmadd(const Packet4d& a, const Packet4d& b, const Packet4d& c) {
-#if EIGEN_COMP_GNUC || EIGEN_COMP_CLANG
+#if ( EIGEN_COMP_GNUC_STRICT || (EIGEN_COMP_CLANG && (EIGEN_COMP_CLANG<308)) )
   // see above
   Packet4d res = c;
   __asm__("vfmadd231pd %[a], %[b], %[c]" : [c] "+x" (res) : [a] "x" (a), [b] "x" (b));
@@ -175,6 +185,15 @@ template<> EIGEN_STRONG_INLINE Packet4d pmin<Packet4d>(const Packet4d& a, const 
 
 template<> EIGEN_STRONG_INLINE Packet8f pmax<Packet8f>(const Packet8f& a, const Packet8f& b) { return _mm256_max_ps(a,b); }
 template<> EIGEN_STRONG_INLINE Packet4d pmax<Packet4d>(const Packet4d& a, const Packet4d& b) { return _mm256_max_pd(a,b); }
+
+template<> EIGEN_STRONG_INLINE Packet8f pround<Packet8f>(const Packet8f& a) { return _mm256_round_ps(a, _MM_FROUND_CUR_DIRECTION); }
+template<> EIGEN_STRONG_INLINE Packet4d pround<Packet4d>(const Packet4d& a) { return _mm256_round_pd(a, _MM_FROUND_CUR_DIRECTION); }
+
+template<> EIGEN_STRONG_INLINE Packet8f pceil<Packet8f>(const Packet8f& a) { return _mm256_ceil_ps(a); }
+template<> EIGEN_STRONG_INLINE Packet4d pceil<Packet4d>(const Packet4d& a) { return _mm256_ceil_pd(a); }
+
+template<> EIGEN_STRONG_INLINE Packet8f pfloor<Packet8f>(const Packet8f& a) { return _mm256_floor_ps(a); }
+template<> EIGEN_STRONG_INLINE Packet4d pfloor<Packet4d>(const Packet4d& a) { return _mm256_floor_pd(a); }
 
 template<> EIGEN_STRONG_INLINE Packet8f pand<Packet8f>(const Packet8f& a, const Packet8f& b) { return _mm256_and_ps(a,b); }
 template<> EIGEN_STRONG_INLINE Packet4d pand<Packet4d>(const Packet4d& a, const Packet4d& b) { return _mm256_and_pd(a,b); }

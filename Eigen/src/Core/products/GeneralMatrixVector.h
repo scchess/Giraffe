@@ -58,7 +58,7 @@ namespace internal {
 template<typename Index, typename LhsScalar, typename LhsMapper, bool ConjugateLhs, typename RhsScalar, typename RhsMapper, bool ConjugateRhs, int Version>
 struct general_matrix_vector_product<Index,LhsScalar,LhsMapper,ColMajor,ConjugateLhs,RhsScalar,RhsMapper,ConjugateRhs,Version>
 {
-  typedef typename scalar_product_traits<LhsScalar, RhsScalar>::ReturnType ResScalar;
+  typedef typename ScalarBinaryOpTraits<LhsScalar, RhsScalar>::ReturnType ResScalar;
 
 enum {
   Vectorizable = packet_traits<LhsScalar>::Vectorizable && packet_traits<RhsScalar>::Vectorizable
@@ -125,7 +125,7 @@ EIGEN_DONT_INLINE void general_matrix_vector_product<Index,LhsScalar,LhsMapper,C
 
   // How many coeffs of the result do we have to skip to be aligned.
   // Here we assume data are at least aligned on the base scalar type.
-  Index alignedStart = internal::first_aligned(res,size);
+  Index alignedStart = internal::first_default_aligned(res,size);
   Index alignedSize = ResPacketSize>1 ? alignedStart + ((size-alignedStart) & ~ResPacketAlignedMask) : 0;
   const Index peeledSize = alignedSize - RhsPacketSize*peels - RhsPacketSize + 1;
 
@@ -140,7 +140,7 @@ EIGEN_DONT_INLINE void general_matrix_vector_product<Index,LhsScalar,LhsMapper,C
   // find how many columns do we have to skip to be aligned with the result (if possible)
   Index skipColumns = 0;
   // if the data cannot be aligned (TODO add some compile time tests when possible, e.g. for floats)
-  if( (lhsAlignmentOffset < 0) || (lhsAlignmentOffset == size) || (size_t(res)%sizeof(ResScalar)) )
+  if( (lhsAlignmentOffset < 0) || (lhsAlignmentOffset == size) || (UIntPtr(res)%sizeof(ResScalar)) )
   {
     alignedSize = 0;
     alignedStart = 0;
@@ -183,8 +183,8 @@ EIGEN_DONT_INLINE void general_matrix_vector_product<Index,LhsScalar,LhsMapper,C
     alignmentPattern = AllAligned;
   }
 
-  const Index offset1 = (FirstAligned && alignmentStep==1?3:1);
-  const Index offset3 = (FirstAligned && alignmentStep==1?1:3);
+  const Index offset1 = (FirstAligned && alignmentStep==1)?3:1;
+  const Index offset3 = (FirstAligned && alignmentStep==1)?1:3;
 
   Index columnBound = ((cols-skipColumns)/columnsAtOnce)*columnsAtOnce + skipColumns;
   for (Index i=skipColumns; i<columnBound; i+=columnsAtOnce)
@@ -334,7 +334,7 @@ EIGEN_DONT_INLINE void general_matrix_vector_product<Index,LhsScalar,LhsMapper,C
 template<typename Index, typename LhsScalar, typename LhsMapper, bool ConjugateLhs, typename RhsScalar, typename RhsMapper, bool ConjugateRhs, int Version>
 struct general_matrix_vector_product<Index,LhsScalar,LhsMapper,RowMajor,ConjugateLhs,RhsScalar,RhsMapper,ConjugateRhs,Version>
 {
-typedef typename scalar_product_traits<LhsScalar, RhsScalar>::ReturnType ResScalar;
+typedef typename ScalarBinaryOpTraits<LhsScalar, RhsScalar>::ReturnType ResScalar;
 
 enum {
   Vectorizable = packet_traits<LhsScalar>::Vectorizable && packet_traits<RhsScalar>::Vectorizable
@@ -457,13 +457,14 @@ EIGEN_DONT_INLINE void general_matrix_vector_product<Index,LhsScalar,LhsMapper,R
     alignmentPattern = AllAligned;
   }
 
-  const Index offset1 = (FirstAligned && alignmentStep==1?3:1);
-  const Index offset3 = (FirstAligned && alignmentStep==1?1:3);
+  const Index offset1 = (FirstAligned && alignmentStep==1)?3:1;
+  const Index offset3 = (FirstAligned && alignmentStep==1)?1:3;
 
   Index rowBound = ((rows-skipRows)/rowsAtOnce)*rowsAtOnce + skipRows;
   for (Index i=skipRows; i<rowBound; i+=rowsAtOnce)
   {
-    EIGEN_ALIGN_DEFAULT ResScalar tmp0 = ResScalar(0);
+    // FIXME: what is the purpose of this EIGEN_ALIGN_DEFAULT ??
+    EIGEN_ALIGN_MAX ResScalar tmp0 = ResScalar(0);
     ResScalar tmp1 = ResScalar(0), tmp2 = ResScalar(0), tmp3 = ResScalar(0);
 
     // this helps the compiler generating good binary code
@@ -572,7 +573,7 @@ EIGEN_DONT_INLINE void general_matrix_vector_product<Index,LhsScalar,LhsMapper,R
   {
     for (Index i=start; i<end; ++i)
     {
-      EIGEN_ALIGN_DEFAULT ResScalar tmp0 = ResScalar(0);
+      EIGEN_ALIGN_MAX ResScalar tmp0 = ResScalar(0);
       ResPacket ptmp0 = pset1<ResPacket>(tmp0);
       const LhsScalars lhs0 = lhs.getVectorMapper(i, 0);
       // process first unaligned result's coeffs

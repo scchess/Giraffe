@@ -76,37 +76,13 @@ public:
 #endif
 };
 
-// template<typename Lhs, typename Rhs> struct product_tag
-// {
-// private:
-//   
-//   typedef typename remove_all<Lhs>::type _Lhs;
-//   typedef typename remove_all<Rhs>::type _Rhs;
-//   enum {
-//     Rows  = _Lhs::RowsAtCompileTime,
-//     Cols  = _Rhs::ColsAtCompileTime,
-//     Depth = EIGEN_SIZE_MIN_PREFER_FIXED(_Lhs::ColsAtCompileTime, _Rhs::RowsAtCompileTime)
-//   };
-// 
-//   enum {
-//     rows_select = Rows==1 ? int(Rows) : int(Large),
-//     cols_select = Cols==1 ? int(Cols) : int(Large),
-//     depth_select = Depth==1 ? int(Depth) : int(Large)
-//   };
-//   typedef product_type_selector<rows_select, cols_select, depth_select> selector;
-// 
-// public:
-//   enum {
-//     ret = selector::ret
-//   };
-// 
-// };
-
 /* The following allows to select the kind of product at compile time
  * based on the three dimensions of the product.
  * This is a compile time mapping from {1,Small,Large}^3 -> {product types} */
 // FIXME I'm not sure the current mapping is the ideal one.
 template<int M, int N>  struct product_type_selector<M,N,1>              { enum { ret = OuterProduct }; };
+template<int M>         struct product_type_selector<M, 1, 1>            { enum { ret = LazyCoeffBasedProductMode }; };
+template<int N>         struct product_type_selector<1, N, 1>            { enum { ret = LazyCoeffBasedProductMode }; };
 template<int Depth>     struct product_type_selector<1,    1,    Depth>  { enum { ret = InnerProduct }; };
 template<>              struct product_type_selector<1,    1,    1>      { enum { ret = InnerProduct }; };
 template<>              struct product_type_selector<Small,1,    Small>  { enum { ret = CoeffBasedProductMode }; };
@@ -125,8 +101,8 @@ template<>              struct product_type_selector<Small,Small,Large>  { enum 
 template<>              struct product_type_selector<Large,Small,Large>  { enum { ret = GemmProduct }; };
 template<>              struct product_type_selector<Small,Large,Large>  { enum { ret = GemmProduct }; };
 template<>              struct product_type_selector<Large,Large,Large>  { enum { ret = GemmProduct }; };
-template<>              struct product_type_selector<Large,Small,Small>  { enum { ret = GemmProduct }; };
-template<>              struct product_type_selector<Small,Large,Small>  { enum { ret = GemmProduct }; };
+template<>              struct product_type_selector<Large,Small,Small>  { enum { ret = CoeffBasedProductMode }; };
+template<>              struct product_type_selector<Small,Large,Small>  { enum { ret = CoeffBasedProductMode }; };
 template<>              struct product_type_selector<Large,Large,Small>  { enum { ret = GemmProduct }; };
 
 } // end namespace internal
@@ -160,7 +136,7 @@ template<>              struct product_type_selector<Large,Large,Small>  { enum 
 namespace internal {
 
 template<int Side, int StorageOrder, bool BlasCompatible>
-struct gemv_dense_sense_selector;
+struct gemv_dense_selector;
 
 } // end namespace internal
 
@@ -183,20 +159,20 @@ struct gemv_static_vector_if<Scalar,Size,Dynamic,true>
 template<typename Scalar,int Size,int MaxSize>
 struct gemv_static_vector_if<Scalar,Size,MaxSize,true>
 {
-  #if EIGEN_ALIGN_STATICALLY
-  internal::plain_array<Scalar,EIGEN_SIZE_MIN_PREFER_FIXED(Size,MaxSize),0> m_data;
-  EIGEN_STRONG_INLINE Scalar* data() { return m_data.array; }
-  #else
-  // Some architectures cannot align on the stack,
-  // => let's manually enforce alignment by allocating more data and return the address of the first aligned element.
   enum {
     ForceAlignment  = internal::packet_traits<Scalar>::Vectorizable,
     PacketSize      = internal::packet_traits<Scalar>::size
   };
-  internal::plain_array<Scalar,EIGEN_SIZE_MIN_PREFER_FIXED(Size,MaxSize)+(ForceAlignment?PacketSize:0),0> m_data;
+  #if EIGEN_MAX_STATIC_ALIGN_BYTES!=0
+  internal::plain_array<Scalar,EIGEN_SIZE_MIN_PREFER_FIXED(Size,MaxSize),0,EIGEN_PLAIN_ENUM_MIN(AlignedMax,PacketSize)> m_data;
+  EIGEN_STRONG_INLINE Scalar* data() { return m_data.array; }
+  #else
+  // Some architectures cannot align on the stack,
+  // => let's manually enforce alignment by allocating more data and return the address of the first aligned element.
+  internal::plain_array<Scalar,EIGEN_SIZE_MIN_PREFER_FIXED(Size,MaxSize)+(ForceAlignment?EIGEN_MAX_ALIGN_BYTES:0),0> m_data;
   EIGEN_STRONG_INLINE Scalar* data() {
     return ForceAlignment
-            ? reinterpret_cast<Scalar*>((reinterpret_cast<size_t>(m_data.array) & ~(size_t(EIGEN_ALIGN_BYTES-1))) + EIGEN_ALIGN_BYTES)
+            ? reinterpret_cast<Scalar*>((internal::UIntPtr(m_data.array) & ~(std::size_t(EIGEN_MAX_ALIGN_BYTES-1))) + EIGEN_MAX_ALIGN_BYTES)
             : m_data.array;
   }
   #endif
@@ -204,19 +180,19 @@ struct gemv_static_vector_if<Scalar,Size,MaxSize,true>
 
 // The vector is on the left => transposition
 template<int StorageOrder, bool BlasCompatible>
-struct gemv_dense_sense_selector<OnTheLeft,StorageOrder,BlasCompatible>
+struct gemv_dense_selector<OnTheLeft,StorageOrder,BlasCompatible>
 {
   template<typename Lhs, typename Rhs, typename Dest>
   static void run(const Lhs &lhs, const Rhs &rhs, Dest& dest, const typename Dest::Scalar& alpha)
   {
     Transpose<Dest> destT(dest);
     enum { OtherStorageOrder = StorageOrder == RowMajor ? ColMajor : RowMajor };
-    gemv_dense_sense_selector<OnTheRight,OtherStorageOrder,BlasCompatible>
+    gemv_dense_selector<OnTheRight,OtherStorageOrder,BlasCompatible>
       ::run(rhs.transpose(), lhs.transpose(), destT, alpha);
   }
 };
 
-template<> struct gemv_dense_sense_selector<OnTheRight,ColMajor,true>
+template<> struct gemv_dense_selector<OnTheRight,ColMajor,true>
 {
   template<typename Lhs, typename Rhs, typename Dest>
   static inline void run(const Lhs &lhs, const Rhs &rhs, Dest& dest, const typename Dest::Scalar& alpha)
@@ -231,7 +207,7 @@ template<> struct gemv_dense_sense_selector<OnTheRight,ColMajor,true>
     typedef internal::blas_traits<Rhs> RhsBlasTraits;
     typedef typename RhsBlasTraits::DirectLinearAccessType ActualRhsType;
   
-    typedef Map<Matrix<ResScalar,Dynamic,1>, Aligned> MappedDest;
+    typedef Map<Matrix<ResScalar,Dynamic,1>, EIGEN_PLAIN_ENUM_MIN(AlignedMax,internal::packet_traits<ResScalar>::size)> MappedDest;
 
     ActualLhsType actualLhs = LhsBlasTraits::extract(lhs);
     ActualRhsType actualRhs = RhsBlasTraits::extract(rhs);
@@ -239,15 +215,18 @@ template<> struct gemv_dense_sense_selector<OnTheRight,ColMajor,true>
     ResScalar actualAlpha = alpha * LhsBlasTraits::extractScalarFactor(lhs)
                                   * RhsBlasTraits::extractScalarFactor(rhs);
 
+    // make sure Dest is a compile-time vector type (bug 1166)
+    typedef typename conditional<Dest::IsVectorAtCompileTime, Dest, typename Dest::ColXpr>::type ActualDest;
+
     enum {
       // FIXME find a way to allow an inner stride on the result if packet_traits<Scalar>::size==1
       // on, the other hand it is good for the cache to pack the vector anyways...
-      EvalToDestAtCompileTime = Dest::InnerStrideAtCompileTime==1,
+      EvalToDestAtCompileTime = (ActualDest::InnerStrideAtCompileTime==1),
       ComplexByReal = (NumTraits<LhsScalar>::IsComplex) && (!NumTraits<RhsScalar>::IsComplex),
-      MightCannotUseDest = (Dest::InnerStrideAtCompileTime!=1) || ComplexByReal
+      MightCannotUseDest = (ActualDest::InnerStrideAtCompileTime!=1) || ComplexByReal
     };
 
-    gemv_static_vector_if<ResScalar,Dest::SizeAtCompileTime,Dest::MaxSizeAtCompileTime,MightCannotUseDest> static_dest;
+    gemv_static_vector_if<ResScalar,ActualDest::SizeAtCompileTime,ActualDest::MaxSizeAtCompileTime,MightCannotUseDest> static_dest;
 
     const bool alphaIsCompatible = (!ComplexByReal) || (numext::imag(actualAlpha)==RealScalar(0));
     const bool evalToDest = EvalToDestAtCompileTime && alphaIsCompatible;
@@ -292,7 +271,7 @@ template<> struct gemv_dense_sense_selector<OnTheRight,ColMajor,true>
   }
 };
 
-template<> struct gemv_dense_sense_selector<OnTheRight,RowMajor,true>
+template<> struct gemv_dense_selector<OnTheRight,RowMajor,true>
 {
   template<typename Lhs, typename Rhs, typename Dest>
   static void run(const Lhs &lhs, const Rhs &rhs, Dest& dest, const typename Dest::Scalar& alpha)
@@ -340,32 +319,33 @@ template<> struct gemv_dense_sense_selector<OnTheRight,RowMajor,true>
         actualLhs.rows(), actualLhs.cols(),
         LhsMapper(actualLhs.data(), actualLhs.outerStride()),
         RhsMapper(actualRhsPtr, 1),
-        dest.data(), dest.innerStride(),
+        dest.data(), dest.col(0).innerStride(), //NOTE  if dest is not a vector at compile-time, then dest.innerStride() might be wrong. (bug 1166)
         actualAlpha);
   }
 };
 
-template<> struct gemv_dense_sense_selector<OnTheRight,ColMajor,false>
+template<> struct gemv_dense_selector<OnTheRight,ColMajor,false>
 {
   template<typename Lhs, typename Rhs, typename Dest>
   static void run(const Lhs &lhs, const Rhs &rhs, Dest& dest, const typename Dest::Scalar& alpha)
   {
-    // TODO makes sure dest is sequentially stored in memory, otherwise use a temp
+    // TODO if rhs is large enough it might be beneficial to make sure that dest is sequentially stored in memory, otherwise use a temp
+    typename nested_eval<Rhs,1>::type actual_rhs(rhs);
     const Index size = rhs.rows();
     for(Index k=0; k<size; ++k)
-      dest += (alpha*rhs.coeff(k)) * lhs.col(k);
+      dest += (alpha*actual_rhs.coeff(k)) * lhs.col(k);
   }
 };
 
-template<> struct gemv_dense_sense_selector<OnTheRight,RowMajor,false>
+template<> struct gemv_dense_selector<OnTheRight,RowMajor,false>
 {
   template<typename Lhs, typename Rhs, typename Dest>
   static void run(const Lhs &lhs, const Rhs &rhs, Dest& dest, const typename Dest::Scalar& alpha)
   {
-    // TODO makes sure rhs is sequentially stored in memory, otherwise use a temp
+    typename nested_eval<Rhs,Lhs::RowsAtCompileTime>::type actual_rhs(rhs);
     const Index rows = dest.rows();
     for(Index i=0; i<rows; ++i)
-      dest.coeffRef(i) += alpha * (lhs.row(i).cwiseProduct(rhs.transpose())).sum();
+      dest.coeffRef(i) += alpha * (lhs.row(i).cwiseProduct(actual_rhs.transpose())).sum();
   }
 };
 

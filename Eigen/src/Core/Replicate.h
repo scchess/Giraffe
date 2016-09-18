@@ -12,21 +12,6 @@
 
 namespace Eigen { 
 
-/**
-  * \class Replicate
-  * \ingroup Core_Module
-  *
-  * \brief Expression of the multiple replication of a matrix or vector
-  *
-  * \param MatrixType the type of the object we are replicating
-  *
-  * This class represents an expression of the multiple replication of a matrix or vector.
-  * It is the return type of DenseBase::replicate() and most of the time
-  * this is the only way it is used.
-  *
-  * \sa DenseBase::replicate()
-  */
-
 namespace internal {
 template<typename MatrixType,int RowFactor,int ColFactor>
 struct traits<Replicate<MatrixType,RowFactor,ColFactor> >
@@ -57,6 +42,22 @@ struct traits<Replicate<MatrixType,RowFactor,ColFactor> >
 };
 }
 
+/**
+  * \class Replicate
+  * \ingroup Core_Module
+  *
+  * \brief Expression of the multiple replication of a matrix or vector
+  *
+  * \tparam MatrixType the type of the object we are replicating
+  * \tparam RowFactor number of repetitions at compile time along the vertical direction, can be Dynamic.
+  * \tparam ColFactor number of repetitions at compile time along the horizontal direction, can be Dynamic.
+  *
+  * This class represents an expression of the multiple replication of a matrix or vector.
+  * It is the return type of DenseBase::replicate() and most of the time
+  * this is the only way it is used.
+  *
+  * \sa DenseBase::replicate()
+  */
 template<typename MatrixType,int RowFactor,int ColFactor> class Replicate
   : public internal::dense_xpr_base< Replicate<MatrixType,RowFactor,ColFactor> >::type
 {
@@ -69,6 +70,7 @@ template<typename MatrixType,int RowFactor,int ColFactor> class Replicate
     typedef typename internal::remove_all<MatrixType>::type NestedExpression;
 
     template<typename OriginalMatrixType>
+    EIGEN_DEVICE_FUNC
     inline explicit Replicate(const OriginalMatrixType& matrix)
       : m_matrix(matrix), m_rowFactor(RowFactor), m_colFactor(ColFactor)
     {
@@ -78,6 +80,7 @@ template<typename MatrixType,int RowFactor,int ColFactor> class Replicate
     }
 
     template<typename OriginalMatrixType>
+    EIGEN_DEVICE_FUNC
     inline Replicate(const OriginalMatrixType& matrix, Index rowFactor, Index colFactor)
       : m_matrix(matrix), m_rowFactor(rowFactor), m_colFactor(colFactor)
     {
@@ -85,9 +88,12 @@ template<typename MatrixType,int RowFactor,int ColFactor> class Replicate
                           THE_MATRIX_OR_EXPRESSION_THAT_YOU_PASSED_DOES_NOT_HAVE_THE_EXPECTED_TYPE)
     }
 
+    EIGEN_DEVICE_FUNC
     inline Index rows() const { return m_matrix.rows() * m_rowFactor.value(); }
+    EIGEN_DEVICE_FUNC
     inline Index cols() const { return m_matrix.cols() * m_colFactor.value(); }
 
+    EIGEN_DEVICE_FUNC
     const _MatrixTypeNested& nestedExpression() const
     { 
       return m_matrix; 
@@ -109,25 +115,10 @@ template<typename MatrixType,int RowFactor,int ColFactor> class Replicate
   */
 template<typename Derived>
 template<int RowFactor, int ColFactor>
-inline const Replicate<Derived,RowFactor,ColFactor>
+const Replicate<Derived,RowFactor,ColFactor>
 DenseBase<Derived>::replicate() const
 {
   return Replicate<Derived,RowFactor,ColFactor>(derived());
-}
-
-/**
-  * \return an expression of the replication of \c *this
-  *
-  * Example: \include MatrixBase_replicate_int_int.cpp
-  * Output: \verbinclude MatrixBase_replicate_int_int.out
-  *
-  * \sa VectorwiseOp::replicate(), DenseBase::replicate<int,int>(), class Replicate
-  */
-template<typename Derived>
-inline const Replicate<Derived,Dynamic,Dynamic>
-DenseBase<Derived>::replicate(Index rowFactor,Index colFactor) const
-{
-  return Replicate<Derived,Dynamic,Dynamic>(derived(),rowFactor,colFactor);
 }
 
 /**

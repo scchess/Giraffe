@@ -43,7 +43,7 @@ struct compute_inverse<MatrixType, ResultType, 1>
   static inline void run(const MatrixType& matrix, ResultType& result)
   {
     typedef typename MatrixType::Scalar Scalar;
-    typename internal::evaluator<MatrixType>::type matrixEval(matrix);
+    internal::evaluator<MatrixType> matrixEval(matrix);
     result.coeffRef(0,0) = Scalar(1) / matrixEval.coeff(0,0);
   }
 };
@@ -286,11 +286,11 @@ struct compute_inverse_and_det_with_check<MatrixType, ResultType, 4>
 namespace internal {
 
 // Specialization for "dense = dense_xpr.inverse()"
-template<typename DstXprType, typename XprType, typename Scalar>
-struct Assignment<DstXprType, Inverse<XprType>, internal::assign_op<Scalar>, Dense2Dense, Scalar>
+template<typename DstXprType, typename XprType>
+struct Assignment<DstXprType, Inverse<XprType>, internal::assign_op<typename DstXprType::Scalar,typename XprType::Scalar>, Dense2Dense>
 {
   typedef Inverse<XprType> SrcXprType;
-  static void run(DstXprType &dst, const SrcXprType &src, const internal::assign_op<Scalar> &)
+  static void run(DstXprType &dst, const SrcXprType &src, const internal::assign_op<typename DstXprType::Scalar,typename XprType::Scalar> &)
   {
     // FIXME shall we resize dst here?
     const int Size = EIGEN_PLAIN_ENUM_MIN(XprType::ColsAtCompileTime,DstXprType::ColsAtCompileTime);
@@ -327,7 +327,7 @@ struct Assignment<DstXprType, Inverse<XprType>, internal::assign_op<Scalar>, Den
   *
   * \sa computeInverseAndDetWithCheck()
   */
-template<typename Derived>
+template<typename Derived> EIGEN_DEVICE_FUNC
 inline const Inverse<Derived> MatrixBase<Derived>::inverse() const
 {
   EIGEN_STATIC_ASSERT(!NumTraits<Scalar>::IsInteger,THIS_FUNCTION_IS_NOT_FOR_INTEGER_NUMERIC_TYPES)

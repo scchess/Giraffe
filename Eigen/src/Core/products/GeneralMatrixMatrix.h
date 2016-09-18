@@ -25,7 +25,7 @@ struct general_matrix_matrix_product<Index,LhsScalar,LhsStorageOrder,ConjugateLh
 {
   typedef gebp_traits<RhsScalar,LhsScalar> Traits;
   
-  typedef typename scalar_product_traits<LhsScalar, RhsScalar>::ReturnType ResScalar;
+  typedef typename ScalarBinaryOpTraits<LhsScalar, RhsScalar>::ReturnType ResScalar;
   static EIGEN_STRONG_INLINE void run(
     Index rows, Index cols, Index depth,
     const LhsScalar* lhs, Index lhsStride,
@@ -55,7 +55,7 @@ struct general_matrix_matrix_product<Index,LhsScalar,LhsStorageOrder,ConjugateLh
 
 typedef gebp_traits<LhsScalar,RhsScalar> Traits;
   
-typedef typename scalar_product_traits<LhsScalar, RhsScalar>::ReturnType ResScalar;
+typedef typename ScalarBinaryOpTraits<LhsScalar, RhsScalar>::ReturnType ResScalar;
 static void run(Index rows, Index cols, Index depth,
   const LhsScalar* _lhs, Index lhsStride,
   const RhsScalar* _rhs, Index rhsStride,
@@ -145,12 +145,9 @@ static void run(Index rows, Index cols, Index depth,
 
       // Release all the sub blocks A'_i of A' for the current thread,
       // i.e., we simply decrement the number of users by 1
-      #pragma omp critical
-      {
       for(Index i=0; i<threads; ++i)
         #pragma omp atomic
-        --(info[i].users);
-      }
+        info[i].users -= 1;
     }
   }
   else
@@ -293,8 +290,13 @@ class gemm_blocking_space<StorageOrder,_LhsScalar,_RhsScalar,MaxRows, MaxCols, M
       SizeB = ActualCols * MaxDepth
     };
 
-    EIGEN_ALIGN_DEFAULT LhsScalar m_staticA[SizeA];
-    EIGEN_ALIGN_DEFAULT RhsScalar m_staticB[SizeB];
+#if EIGEN_MAX_STATIC_ALIGN_BYTES >= EIGEN_DEFAULT_ALIGN_BYTES
+    EIGEN_ALIGN_MAX LhsScalar m_staticA[SizeA];
+    EIGEN_ALIGN_MAX RhsScalar m_staticB[SizeB];
+#else
+    EIGEN_ALIGN_MAX char m_staticA[SizeA * sizeof(LhsScalar) + EIGEN_DEFAULT_ALIGN_BYTES-1];
+    EIGEN_ALIGN_MAX char m_staticB[SizeB * sizeof(RhsScalar) + EIGEN_DEFAULT_ALIGN_BYTES-1];
+#endif
 
   public:
 
@@ -303,8 +305,13 @@ class gemm_blocking_space<StorageOrder,_LhsScalar,_RhsScalar,MaxRows, MaxCols, M
       this->m_mc = ActualRows;
       this->m_nc = ActualCols;
       this->m_kc = MaxDepth;
+#if EIGEN_MAX_STATIC_ALIGN_BYTES >= EIGEN_DEFAULT_ALIGN_BYTES
       this->m_blockA = m_staticA;
       this->m_blockB = m_staticB;
+#else
+      this->m_blockA = reinterpret_cast<LhsScalar*>((internal::UIntPtr(m_staticA) + (EIGEN_DEFAULT_ALIGN_BYTES-1)) & ~std::size_t(EIGEN_DEFAULT_ALIGN_BYTES-1));
+      this->m_blockB = reinterpret_cast<RhsScalar*>((internal::UIntPtr(m_staticB) + (EIGEN_DEFAULT_ALIGN_BYTES-1)) & ~std::size_t(EIGEN_DEFAULT_ALIGN_BYTES-1));
+#endif
     }
     
     void initParallel(Index, Index, Index, Index)
@@ -345,9 +352,8 @@ class gemm_blocking_space<StorageOrder,_LhsScalar,_RhsScalar,MaxRows, MaxCols, M
       }
       else  // no l3 blocking
       {
-        Index m = this->m_mc;
         Index n = this->m_nc;
-        computeProductBlockingSizes<LhsScalar,RhsScalar,KcFactor>(this->m_kc, m, n, num_threads);
+        computeProductBlockingSizes<LhsScalar,RhsScalar,KcFactor>(this->m_kc, this->m_mc, n, num_threads);
       }
 
       m_sizeA = this->m_mc * this->m_kc;

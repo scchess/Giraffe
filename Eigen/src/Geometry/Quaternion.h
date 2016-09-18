@@ -103,11 +103,11 @@ class QuaternionBase : public RotationBase<Derived, 3>
   /** \returns a quaternion representing an identity rotation
     * \sa MatrixBase::Identity()
     */
-  static inline Quaternion<Scalar> Identity() { return Quaternion<Scalar>(1, 0, 0, 0); }
+  static inline Quaternion<Scalar> Identity() { return Quaternion<Scalar>(Scalar(1), Scalar(0), Scalar(0), Scalar(0)); }
 
   /** \sa QuaternionBase::Identity(), MatrixBase::setIdentity()
     */
-  inline QuaternionBase& setIdentity() { coeffs() << 0, 0, 0, 1; return *this; }
+  inline QuaternionBase& setIdentity() { coeffs() << Scalar(0), Scalar(0), Scalar(0), Scalar(1); return *this; }
 
   /** \returns the squared norm of the quaternion's coefficients
     * \sa QuaternionBase::norm(), MatrixBase::squaredNorm()
@@ -217,8 +217,8 @@ struct traits<Quaternion<_Scalar,_Options> >
   typedef _Scalar Scalar;
   typedef Matrix<_Scalar,4,1,_Options> Coefficients;
   enum{
-    IsAligned = (internal::traits<Coefficients>::EvaluatorFlags & AlignedBit) != 0,
-    Flags = IsAligned ? (AlignedBit | LvalueBit) : LvalueBit
+    Alignment = internal::traits<Coefficients>::Alignment,
+    Flags = LvalueBit
   };
 };
 }
@@ -228,7 +228,7 @@ class Quaternion : public QuaternionBase<Quaternion<_Scalar,_Options> >
 {
 public:
   typedef QuaternionBase<Quaternion<_Scalar,_Options> > Base;
-  enum { IsAligned = internal::traits<Quaternion>::IsAligned };
+  enum { NeedsAlignment = internal::traits<Quaternion>::Alignment>0 };
 
   typedef _Scalar Scalar;
 
@@ -271,13 +271,19 @@ public:
   explicit inline Quaternion(const Quaternion<OtherScalar, OtherOptions>& other)
   { m_coeffs = other.coeffs().template cast<Scalar>(); }
 
+  static Quaternion UnitRandom();
+
   template<typename Derived1, typename Derived2>
   static Quaternion FromTwoVectors(const MatrixBase<Derived1>& a, const MatrixBase<Derived2>& b);
 
   inline Coefficients& coeffs() { return m_coeffs;}
   inline const Coefficients& coeffs() const { return m_coeffs;}
 
-  EIGEN_MAKE_ALIGNED_OPERATOR_NEW_IF(IsAligned)
+  EIGEN_MAKE_ALIGNED_OPERATOR_NEW_IF(bool(NeedsAlignment))
+  
+#ifdef EIGEN_QUATERNION_PLUGIN
+# include EIGEN_QUATERNION_PLUGIN
+#endif
 
 protected:
   Coefficients m_coeffs;
@@ -441,7 +447,7 @@ QuaternionBase<Derived>::operator* (const QuaternionBase<OtherDerived>& other) c
    YOU_MIXED_DIFFERENT_NUMERIC_TYPES__YOU_NEED_TO_USE_THE_CAST_METHOD_OF_MATRIXBASE_TO_CAST_NUMERIC_TYPES_EXPLICITLY)
   return internal::quat_product<Architecture::Target, Derived, OtherDerived,
                          typename internal::traits<Derived>::Scalar,
-                         (internal::traits<Derived>::IsAligned && internal::traits<OtherDerived>::IsAligned)?Aligned:Unaligned>::run(*this, other);
+                         EIGEN_PLAIN_ENUM_MIN(internal::traits<Derived>::Alignment, internal::traits<OtherDerived>::Alignment)>::run(*this, other);
 }
 
 /** \sa operator*(Quaternion) */
@@ -605,6 +611,24 @@ inline Derived& QuaternionBase<Derived>::setFromTwoVectors(const MatrixBase<Deri
   return derived();
 }
 
+/** \returns a random unit quaternion following a uniform distribution law on SO(3)
+  *
+  * \note The implementation is based on http://planning.cs.uiuc.edu/node198.html
+  */
+template<typename Scalar, int Options>
+Quaternion<Scalar,Options> Quaternion<Scalar,Options>::UnitRandom()
+{
+  using std::sqrt;
+  using std::sin;
+  using std::cos;
+  const Scalar u1 = internal::random<Scalar>(0, 1),
+               u2 = internal::random<Scalar>(0, 2*EIGEN_PI),
+               u3 = internal::random<Scalar>(0, 2*EIGEN_PI);
+  const Scalar a = sqrt(1 - u1),
+               b = sqrt(u1);
+  return Quaternion (a * sin(u2), a * cos(u2), b * sin(u3), b * cos(u3));
+}
+
 
 /** Returns a quaternion representing a rotation between
   * the two arbitrary vectors \a a and \a b. In other words, the built
@@ -668,7 +692,7 @@ QuaternionBase<Derived>::conjugate() const
 {
   return internal::quat_conj<Architecture::Target, Derived,
                          typename internal::traits<Derived>::Scalar,
-                         internal::traits<Derived>::IsAligned?Aligned:Unaligned>::run(*this);
+                         internal::traits<Derived>::Alignment>::run(*this);
                          
 }
 
@@ -702,7 +726,7 @@ QuaternionBase<Derived>::slerp(const Scalar& t, const QuaternionBase<OtherDerive
   using std::acos;
   using std::sin;
   using std::abs;
-  static const Scalar one = Scalar(1) - NumTraits<Scalar>::epsilon();
+  const Scalar one = Scalar(1) - NumTraits<Scalar>::epsilon();
   Scalar d = this->dot(other);
   Scalar absD = abs(d);
 
@@ -735,8 +759,9 @@ template<typename Other>
 struct quaternionbase_assign_impl<Other,3,3>
 {
   typedef typename Other::Scalar Scalar;
-  template<class Derived> static inline void run(QuaternionBase<Derived>& q, const Other& mat)
+  template<class Derived> static inline void run(QuaternionBase<Derived>& q, const Other& a_mat)
   {
+    const typename internal::nested_eval<Other,2>::type mat(a_mat);
     using std::sqrt;
     // This algorithm comes from  "Quaternion Calculus and Fast Animation",
     // Ken Shoemake, 1987 SIGGRAPH course notes

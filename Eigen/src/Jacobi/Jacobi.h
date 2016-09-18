@@ -85,7 +85,8 @@ bool JacobiRotation<Scalar>::makeJacobi(const RealScalar& x, const Scalar& y, co
   using std::sqrt;
   using std::abs;
   typedef typename NumTraits<Scalar>::Real RealScalar;
-  if(y == Scalar(0))
+  RealScalar deno = RealScalar(2)*abs(y);
+  if(deno < (std::numeric_limits<RealScalar>::min)())
   {
     m_c = Scalar(1);
     m_s = Scalar(0);
@@ -93,7 +94,7 @@ bool JacobiRotation<Scalar>::makeJacobi(const RealScalar& x, const Scalar& y, co
   }
   else
   {
-    RealScalar tau = (x-z)/(RealScalar(2)*abs(y));
+    RealScalar tau = (x-z)/deno;
     RealScalar w = sqrt(numext::abs2(tau) + RealScalar(1));
     RealScalar t;
     if(tau>RealScalar(0))
@@ -263,7 +264,7 @@ namespace internal {
   * \sa MatrixBase::applyOnTheLeft(), MatrixBase::applyOnTheRight()
   */
 template<typename VectorX, typename VectorY, typename OtherScalar>
-void apply_rotation_in_the_plane(VectorX& _x, VectorY& _y, const JacobiRotation<OtherScalar>& j);
+void apply_rotation_in_the_plane(DenseBase<VectorX>& xpr_x, DenseBase<VectorY>& xpr_y, const JacobiRotation<OtherScalar>& j);
 }
 
 /** \jacobi_module
@@ -298,18 +299,18 @@ inline void MatrixBase<Derived>::applyOnTheRight(Index p, Index q, const JacobiR
 
 namespace internal {
 template<typename VectorX, typename VectorY, typename OtherScalar>
-void /*EIGEN_DONT_INLINE*/ apply_rotation_in_the_plane(VectorX& _x, VectorY& _y, const JacobiRotation<OtherScalar>& j)
+void /*EIGEN_DONT_INLINE*/ apply_rotation_in_the_plane(DenseBase<VectorX>& xpr_x, DenseBase<VectorY>& xpr_y, const JacobiRotation<OtherScalar>& j)
 {
   typedef typename VectorX::Scalar Scalar;
   enum { PacketSize = packet_traits<Scalar>::size };
   typedef typename packet_traits<Scalar>::type Packet;
-  eigen_assert(_x.size() == _y.size());
-  Index size = _x.size();
-  Index incrx = _x.innerStride();
-  Index incry = _y.innerStride();
+  eigen_assert(xpr_x.size() == xpr_y.size());
+  Index size = xpr_x.size();
+  Index incrx = xpr_x.derived().innerStride();
+  Index incry = xpr_y.derived().innerStride();
 
-  Scalar* EIGEN_RESTRICT x = &_x.coeffRef(0);
-  Scalar* EIGEN_RESTRICT y = &_y.coeffRef(0);
+  Scalar* EIGEN_RESTRICT x = &xpr_x.derived().coeffRef(0);
+  Scalar* EIGEN_RESTRICT y = &xpr_y.derived().coeffRef(0);
   
   OtherScalar c = j.c();
   OtherScalar s = j.s();
@@ -325,7 +326,7 @@ void /*EIGEN_DONT_INLINE*/ apply_rotation_in_the_plane(VectorX& _x, VectorY& _y,
     // both vectors are sequentially stored in memory => vectorization
     enum { Peeling = 2 };
 
-    Index alignedStart = internal::first_aligned(y, size);
+    Index alignedStart = internal::first_default_aligned(y, size);
     Index alignedEnd = alignedStart + ((size-alignedStart)/PacketSize)*PacketSize;
 
     const Packet pc = pset1<Packet>(c);
@@ -343,7 +344,7 @@ void /*EIGEN_DONT_INLINE*/ apply_rotation_in_the_plane(VectorX& _x, VectorY& _y,
     Scalar* EIGEN_RESTRICT px = x + alignedStart;
     Scalar* EIGEN_RESTRICT py = y + alignedStart;
 
-    if(internal::first_aligned(x, size)==alignedStart)
+    if(internal::first_default_aligned(x, size)==alignedStart)
     {
       for(Index i=alignedStart; i<alignedEnd; i+=PacketSize)
       {
@@ -392,7 +393,7 @@ void /*EIGEN_DONT_INLINE*/ apply_rotation_in_the_plane(VectorX& _x, VectorY& _y,
   /*** fixed-size vectorized path ***/
   else if(VectorX::SizeAtCompileTime != Dynamic &&
           (VectorX::Flags & VectorY::Flags & PacketAccessBit) &&
-          (VectorX::Flags & VectorY::Flags & AlignedBit))
+          (EIGEN_PLAIN_ENUM_MIN(evaluator<VectorX>::Alignment, evaluator<VectorY>::Alignment)>0)) // FIXME should be compared to the required alignment
   {
     const Packet pc = pset1<Packet>(c);
     const Packet ps = pset1<Packet>(s);
