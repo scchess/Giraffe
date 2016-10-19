@@ -38,3 +38,6 @@ gtb/libgtb.a
 obj/move_stats/.hidden
 eval.t7
 dep/move_stats/.hidden
+trainingResults/*
+*.log
+logs
