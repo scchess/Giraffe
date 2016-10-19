@@ -18,6 +18,14 @@
 #ifndef ANN_H
 #define ANN_H
 
+#include "eigen_ann.h"
+
+#ifndef HAS_TORCH
+
+using ANN = EigenANN;
+
+#else
+
 #include <random>
 #include <string>
 #include <ostream>
@@ -35,7 +43,6 @@
 #include <lauxlib.h>
 #include <TH/THTensor.h>
 
-#include "eigen_ann.h"
 #include "matrix_ops.h"
 
 namespace
@@ -72,6 +79,34 @@ public:
 	{
 		THFloatTensor_retain(tensor);
 		luaT_pushudata(m_state, (void *) tensor, "torch.FloatTensor");
+		++m_numArgsPushed;
+	}
+
+	void PushFloatVector(const std::vector<float> &v)
+	{
+		lua_createtable(m_state, v.size(), 0);
+
+		for (int64_t i = 0; i < static_cast<int64_t>(v.size()); ++i)
+		{
+			lua_pushinteger(m_state, i + 1);
+			lua_pushnumber(m_state, v[i]);
+			lua_settable(m_state, -3);
+		}
+
+		++m_numArgsPushed;
+	}
+
+	void PushInt64Vector(const std::vector<int64_t> &v)
+	{
+		lua_createtable(m_state, v.size(), 0);
+
+		for (int64_t i = 0; i < static_cast<int64_t>(v.size()); ++i)
+		{
+			lua_pushinteger(m_state, i + 1);
+			lua_pushinteger(m_state, v[i]);
+			lua_settable(m_state, -3);
+		}
+
 		++m_numArgsPushed;
 	}
 
@@ -136,12 +171,30 @@ public:
 	ANN(bool eigenOnly = false);
 	ANN(const std::string &networkFile);
 	ANN(const std::string &functionName, int numInputs);
+	ANN(const std::string &functionName, int numInputs, const std::vector<int64_t> &slices, const std::vector<float> &reductionFactors);
+
+	void InitEligibilityTraces(int batchSize)
+	{
+		LuaFunctionCall<1, 0> call(m_luaState, "init_eligibility_traces");
+		call.PushInt(batchSize);
+		call.Call();
+	}
+
+	void ResetEligibilityTrace(int batchNum)
+	{
+		LuaFunctionCall<1, 0> call(m_luaState, "reset_eligibility_trace");
+		call.PushInt(batchNum + 1);
+		call.Call();
+	}
 
 	template <typename Derived>
 	float ForwardSingle(const Eigen::MatrixBase<Derived> &v);
 
+	// When we are training ensembles we don't want each forward to result in re-serialization of Eigen ANNs
 	template <typename Derived>
-	NNMatrixRM *ForwardMultiple(const Eigen::MatrixBase<Derived> &x);
+	NNMatrixRM *ForwardMultiple(const Eigen::MatrixBase<Derived> &x, bool useTorch = false);
+
+	void UpdateWithEligibilityTraces(NNMatrixRM &x_before, NNMatrixRM &err);
 
 	float Train(const NNMatrixRM &x, const NNMatrixRM &t);
 
@@ -187,6 +240,8 @@ private:
 
 	void SetIsTraining_(bool training);
 
+	void CheckFreeTensor_(THFloatTensor *&tensor);
+
 	bool m_eigenOnly = false;
 	bool m_eigenAnnUpToDate = false;
 	EigenANN m_eigenAnn;
@@ -217,11 +272,12 @@ float ANN::ForwardSingle(const Eigen::MatrixBase<Derived> &v)
 
 	return m_eigenAnn.ForwardSingle(v);
 #else
+	assert(!m_eigenOnly);
+
 	if (!m_inputTensorSingle)
 	{
 		m_inputTensorSingle = THFloatTensor_newWithSize1d(v.size());
 		THFloatTensor_retain(m_inputTensorSingle);
-
 		LuaFunctionCall<1, 0> registerCall(m_luaState, "register_input_tensor");
 		registerCall.PushTensor(m_inputTensorSingle);
 		registerCall.Call();
@@ -229,7 +285,6 @@ float ANN::ForwardSingle(const Eigen::MatrixBase<Derived> &v)
 
 	Eigen::Map<NNVector> tensorMap(THFloatTensor_data(m_inputTensorSingle), v.size());
 	tensorMap = v;
-
 	LuaFunctionCall<0, 1> forwardCall(m_luaState, "forward_single");
 	forwardCall.Call();
 	float torchOutput = forwardCall.PopNumber();
@@ -238,38 +293,43 @@ float ANN::ForwardSingle(const Eigen::MatrixBase<Derived> &v)
 }
 
 template <typename Derived>
-NNMatrixRM *ANN::ForwardMultiple(const Eigen::MatrixBase<Derived> &x)
+NNMatrixRM *ANN::ForwardMultiple(const Eigen::MatrixBase<Derived> &x, bool useTorch)
 {
-#if 1
-	if (!m_eigenAnnUpToDate)
+	if (!useTorch)
 	{
-		m_eigenAnn.FromString(ToString());
-		m_eigenAnnUpToDate = true;
-	}
+		if (!m_eigenAnnUpToDate)
+		{
+			m_eigenAnn.FromString(ToString());
+			m_eigenAnnUpToDate = true;
+		}
 
-	return m_eigenAnn.ForwardMultiple(x);
-#else
-	if (!m_inputTensorMultiple)
+		return m_eigenAnn.ForwardMultiple(x);
+	}
+	else
 	{
-		m_inputTensorMultiple = THFloatTensor_newWithSize2d(x.rows(), x.cols());
-		THFloatTensor_retain(m_inputTensorMultiple);
+		if (!m_inputTensorMultiple || THFloatTensor_size(m_inputTensorMultiple, 0) != x.rows())
+		{
+			CheckFreeTensor_(m_inputTensorMultiple);
+			m_inputTensorMultiple = THFloatTensor_newWithSize2d(x.rows(), x.cols());
 
-		LuaFunctionCall<1, 0> registerCall(m_luaState, "register_input_tensor_multiple");
-		registerCall.PushTensor(m_inputTensorMultiple);
-		registerCall.Call();
+			LuaFunctionCall<1, 0> registerCall(m_luaState, "register_input_tensor_multiple");
+			registerCall.PushTensor(m_inputTensorMultiple);
+			registerCall.Call();
+		}
+
+		Eigen::Map<NNMatrixRM> tensorMap(THFloatTensor_data(m_inputTensorMultiple), x.rows(), x.cols());
+		tensorMap = x;
+
+		LuaFunctionCall<0, 1> forwardCall(m_luaState, "forward_multiple");
+		forwardCall.Call();
+		auto tensor = forwardCall.PopTensor();
+		Eigen::Map<NNMatrixRM> returnedTensorMap(THFloatTensor_data(tensor), x.rows(), 1);
+
+		m_outputMatrix = returnedTensorMap;
+		return &m_outputMatrix;
 	}
-
-	Eigen::Map<NNMatrixRM> tensorMap(THFloatTensor_data(m_inputTensorMultiple), x.rows(), x.cols());
-	tensorMap = x;
-
-	LuaFunctionCall<0, 1> forwardCall(m_luaState, "forward_multiple");
-	forwardCall.Call();
-	auto tensor = forwardCall.PopTensor();
-	Eigen::Map<NNMatrixRM> returnedTensorMap(THFloatTensor_data(tensor), x.rows(), 1);
-
-	m_outputMatrix = returnedTensorMap;
-	return &m_outputMatrix;
-#endif
 }
+
+#endif // HAS_TORCH
 
 #endif // ANN_H

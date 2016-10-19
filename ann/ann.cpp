@@ -15,6 +15,8 @@
 	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#ifdef HAS_TORCH
+
 #include "ann.h"
 
 #include "random_device.h"
@@ -44,24 +46,62 @@ ANN::ANN(const std::string &functionName, int numInputs)
 	makeCall.Call();
 }
 
-float ANN::Train(const NNMatrixRM &x, const NNMatrixRM &t)
+ANN::ANN(const std::string &functionName, int numInputs, const std::vector<int64_t> &slices, const std::vector<float> &reductionFactors)
+{
+	Init_();
+
+	LuaFunctionCall<3, 0> makeCall(m_luaState, functionName.c_str());
+	makeCall.PushInt(numInputs);
+	makeCall.PushInt64Vector(slices);
+	makeCall.PushFloatVector(reductionFactors);
+	makeCall.Call();
+}
+
+void ANN::UpdateWithEligibilityTraces(NNMatrixRM &x_before, NNMatrixRM &err)
 {
 	assert(!m_eigenOnly);
 
-	if (!m_trainingX || !m_trainingT)
+	// we can reuse m_trainingT for err, although this is a bit ugly
+	if (!m_trainingX || !m_trainingT || THFloatTensor_size(m_trainingX, 0) != x_before.rows())
 	{
-		m_trainingX = THFloatTensor_newWithSize2d(x.rows(), x.cols());
-		m_trainingT = THFloatTensor_newWithSize2d(t.rows(), t.cols());
-		THFloatTensor_retain(m_trainingX);
-		THFloatTensor_retain(m_trainingT);
+		CheckFreeTensor_(m_trainingX);
+		CheckFreeTensor_(m_trainingT);
+
+		m_trainingX = THFloatTensor_newWithSize2d(x_before.rows(), x_before.cols());
+		m_trainingT = THFloatTensor_newWithSize2d(err.rows(), err.cols());
 	}
 
 	m_eigenAnnUpToDate = false;
 
-	assert(x.rows() == THFloatTensor_size(m_trainingX, 0));
-	assert(x.cols() == THFloatTensor_size(m_trainingX, 1));
-	assert(t.rows() == THFloatTensor_size(m_trainingT, 0));
-	assert(t.cols() == 1);
+	Eigen::Map<NNMatrixRM> xMap(THFloatTensor_data(m_trainingX), x_before.rows(), x_before.cols());
+	Eigen::Map<NNMatrixRM> tMap(THFloatTensor_data(m_trainingT), err.rows(), err.cols());
+	xMap = x_before;
+	tMap = err;
+
+	SetIsTraining_(true);
+
+	LuaFunctionCall<2, 0> trainCall(m_luaState, "update_with_eligibility_traces");
+	trainCall.PushTensor(m_trainingX);
+	trainCall.PushTensor(m_trainingT);
+	trainCall.Call();
+
+	SetIsTraining_(false);
+}
+
+float ANN::Train(const NNMatrixRM &x, const NNMatrixRM &t)
+{
+	assert(!m_eigenOnly);
+
+	if (!m_trainingX || !m_trainingT || THFloatTensor_size(m_trainingX, 0) != x.rows())
+	{
+		CheckFreeTensor_(m_trainingX);
+		CheckFreeTensor_(m_trainingT);
+
+		m_trainingX = THFloatTensor_newWithSize2d(x.rows(), x.cols());
+		m_trainingT = THFloatTensor_newWithSize2d(t.rows(), t.cols());
+	}
+
+	m_eigenAnnUpToDate = false;
 
 	Eigen::Map<NNMatrixRM> xMap(THFloatTensor_data(m_trainingX), x.rows(), x.cols());
 	Eigen::Map<NNMatrixRM> tMap(THFloatTensor_data(m_trainingT), t.rows(), t.cols());
@@ -126,19 +166,10 @@ void ANN::FromString(const std::string &s)
 
 ANN::~ANN()
 {
-	auto checkFreeTensorFcn = [](THFloatTensor *&tensor)
-	{
-		if (tensor != nullptr)
-		{
-			THFloatTensor_free(tensor);
-			tensor = nullptr;
-		}
-	};
-
-	checkFreeTensorFcn(m_inputTensorSingle);
-	checkFreeTensorFcn(m_inputTensorMultiple);
-	checkFreeTensorFcn(m_trainingX);
-	checkFreeTensorFcn(m_trainingT);
+	CheckFreeTensor_(m_inputTensorSingle);
+	CheckFreeTensor_(m_inputTensorMultiple);
+	CheckFreeTensor_(m_trainingX);
+	CheckFreeTensor_(m_trainingT);
 
 	if (m_luaState != nullptr)
 	{
@@ -164,3 +195,14 @@ void ANN::SetIsTraining_(bool training)
 	isTrainingCall.PushBool(training);
 	isTrainingCall.Call();
 }
+
+void ANN::CheckFreeTensor_(THFloatTensor *&tensor)
+{
+	if (tensor != nullptr)
+	{
+		THFloatTensor_free(tensor);
+		tensor = nullptr;
+	}
+}
+
+#endif
