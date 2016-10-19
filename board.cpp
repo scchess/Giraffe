@@ -2265,6 +2265,58 @@ Optional<Move> Board::GetMoveFromLast(int32_t n)
 	return ret;
 }
 
+Board Board::GetMirroredPosition() const
+{
+	Board newBoard;
+
+	for (uint32_t i = 0; i < BOARD_DESC_BB_SIZE; ++i)
+	{
+		newBoard.m_boardDescBB[i] = 0;
+	}
+
+	for (uint32_t i = 0; i < BOARD_DESC_U8_SIZE; ++i)
+	{
+		newBoard.m_boardDescU8[i] = 0;
+	}
+
+	for (Square sq = 0; sq < 64; ++sq)
+	{
+		Square newSq = Sq(GetX(sq), 7 - GetY(sq));
+		newBoard.RemovePiece(newSq);
+
+		if (m_boardDescU8[sq] != EMPTY)
+		{
+			// mirror and change colour of all pieces
+			newBoard.PlacePiece(newSq, m_boardDescU8[sq] ^ COLOR_MASK);
+		}
+	}
+
+	newBoard.m_boardDescU8[SIDE_TO_MOVE] = GetSideToMove() ^ COLOR_MASK;
+
+	if (m_boardDescBB[EN_PASS_SQUARE])
+	{
+		Square oldSq = BitScanForward(m_boardDescBB[EN_PASS_SQUARE]);
+		Square newSq = Sq(GetX(oldSq), 7 - GetY(oldSq));
+		newBoard.m_boardDescBB[EN_PASS_SQUARE] = Bit(newSq);
+	}
+
+	newBoard.m_boardDescU8[W_SHORT_CASTLE] = m_boardDescU8[B_SHORT_CASTLE];
+	newBoard.m_boardDescU8[W_LONG_CASTLE] = m_boardDescU8[B_LONG_CASTLE];
+	newBoard.m_boardDescU8[B_SHORT_CASTLE] = m_boardDescU8[W_SHORT_CASTLE];
+	newBoard.m_boardDescU8[B_LONG_CASTLE] = m_boardDescU8[W_LONG_CASTLE];
+
+	newBoard.m_boardDescU8[HALF_MOVES_CLOCK] = m_boardDescU8[HALF_MOVES_CLOCK];
+
+	newBoard.UpdateInCheck_();
+	newBoard.UpdateHashFull_();
+
+#ifdef DEBUG
+	newBoard.CheckBoardConsistency();
+#endif
+
+	return newBoard;
+}
+
 template <Board::MOVE_TYPES MT>
 void Board::GenerateAllPseudoLegalMoves_(MoveList &moveList) const
 {
