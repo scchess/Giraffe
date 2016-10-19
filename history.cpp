@@ -85,3 +85,18 @@ void History::NotifyMoveMade()
 		}
 	}
 }
+
+void History::Clear()
+{
+	for (int32_t c = 0; c < 2; ++c)
+	{
+		for (int32_t from = 0; from < 64; ++from)
+		{
+			for (int32_t to = 0; to < 64; ++to)
+			{
+				m_cutoffCounts[c][from][to] = 0;
+				m_nonCutoffCounts[c][from][to] = 0;
+			}
+		}
+	}
+}

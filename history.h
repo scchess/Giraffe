@@ -39,6 +39,8 @@ public:
 
 	void NotifyMoveMade();
 
+	void Clear();
+
 private:
 	// colour, from, to
 	uint64_t m_cutoffCounts[2][64][64];
