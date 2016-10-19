@@ -43,14 +43,20 @@ public:
 
 	const static size_t EvalHashSize = 8*MB / sizeof(EvalHashEntry);
 	const static size_t BatchSize = 8;
+	const static size_t EnsembleSize = 8;
 
 	ANNEvaluator(bool eigenOnly = false);
 
 	ANNEvaluator(const std::string &filename);
 
+	void BuildEnsemble();
+	void LoadEnsemble(const std::string &baseFilename);
+	void SaveEnsemble(const std::string &baseFilename);
+
 	void FromString(const std::string &str)
 	{
 		m_ann.FromString(str);
+
 		InvalidateCache();
 	}
 
@@ -59,7 +65,7 @@ public:
 		return m_ann.ToString();
 	}
 
-	void BuildANN(int64_t inputDims);
+	void BuildANN();
 
 	void Serialize(const std::string &filename);
 
@@ -68,11 +74,14 @@ public:
 	// Targets should be in STM
 	float Train(const NNMatrixRM &x, const NNMatrixRM &t);
 
+	float TrainWithEnsemble(const NNMatrixRM &x, const NNMatrixRM &t);
+
+	// This is only used in training
+	NNMatrixRM *EvaluateMatrixWTM(const NNMatrixRM x);
+
 	void ResetOptimizer() { m_ann.ResetOptimizer(); }
 
 	bool IsANNEval() override { return true; }
-
-	Score EvaluateForSTM(Board &b, Score lowerBound = SCORE_MIN, Score upperBound = SCORE_MAX) override;
 
 	Score EvaluateForWhiteImpl(Board &b, Score lowerBound, Score upperBound) override;
 
@@ -125,6 +134,8 @@ public:
 			HashStore_(m_batchHashes[i], (*results)(i, 0));
 		}
 	}
+
+	~ANNEvaluator() {}
 
 private:
 	NNMatrixRM BoardsToFeatureRepresentation_(const std::vector<std::string> &positions, const std::vector<FeaturesConv::FeatureDescription> &featureDescriptions);
@@ -181,6 +192,8 @@ private:
 	}
 
 	ANN m_ann;
+
+	std::vector<ANN> m_ensemble;
 
 	std::vector<float> m_convTmp;
 
