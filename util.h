@@ -57,11 +57,42 @@ inline std::string ToStr(const T &x)
 	return ss.str();
 }
 
+template <typename T>
+inline T ParseStr(const std::string &str)
+{
+	T ret;
+	std::stringstream ss(str);
+	ss >> ret;
+	return ret;
+}
+
 inline bool FileReadable(const std::string &filename)
 {
 	std::ifstream infile(filename);
 
 	return infile.good();
 }
+
+class Periodic
+{
+public:
+	Periodic(double delay) : m_next(0.0), m_delay(delay) {}
+
+	bool Call(std::function<void()> fcn, bool force = false)
+	{
+		if ((force || (CurrentTime() > m_next)) && fcn)
+		{
+			fcn();
+			m_next = CurrentTime() + m_delay;
+			return true;
+		}
+
+		return false;
+	}
+
+private:
+	double m_next;
+	double m_delay;
+};
 
 #endif // UTIL_H
