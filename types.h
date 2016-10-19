@@ -209,6 +209,14 @@ inline bool IsMateScore(Score score)
 	return score > MATE_MOVING_SIDE_THRESHOLD || score < MATE_OPPONENT_SIDE_THRESHOLD;
 }
 
+inline bool IsDrawScore(Score score)
+{
+	// this is not perfect, but should be a good enough approximation because neural nets
+	// will likely never output a hard zero
+	// we can also enforce that in the future if this becomes a problem
+	return score == 0;
+}
+
 inline Score MakeWinningScore(int32_t plies)
 {
 	return MATE_MOVING_SIDE - plies;
@@ -238,6 +246,6 @@ private:
 	bool m_valid;
 };
 
-typedef float NodeBudget;
+typedef uint64_t NodeBudget;
 
 #endif // TYPES_H
