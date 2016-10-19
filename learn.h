@@ -20,30 +20,51 @@
 
 #include <string>
 #include <fstream>
+#include <map>
+#include <vector>
 
 #include <iostream>
 
 #include "Eigen/Core"
 
+#include "board.h"
+#include "evaluator.h"
+
 namespace Learn
 {
 
-const static int64_t NumIterations = 1000000;
-const static float TDLambda = 0.7f; // this is discount due to credit assignment uncertainty
+const static int64_t NumIterations = 1000000000;
+const static float TDLambda = 0.5f; // this is discount due to credit assignment uncertainty
 const static float AbsLambda = 0.995f; // this is discount to encourage progress, and account for the snowball effect
-const static int64_t HalfMovesToMake = 32;
 const static size_t PositionsFirstIteration = 100000;
-const static int64_t PositionsEarlyIterations = 100000;
-const static int64_t NumEarlyIteartions = 10;
+
 const static int64_t PositionsPerIteration = 1000000;
+const static int64_t EvaluatorSerializeInterval = 1;
+const static int64_t HalfMovesToMake = 64;
+
 const static int64_t SgdBatchSize = 1024;
 const static int64_t SgdEpochs = 10;
-const static int64_t SearchNodeBudget = 256;
-const static int64_t EvaluatorSerializeInterval = 1;
-const static int64_t IterationPrintInterval = 1;
+const static int64_t SearchNodeBudget = 512;
 const static std::string TrainingLogFileName = "training.log";
 
-void TDL(const std::string &positionsFilename);
+void TDL(const std::string &positionsFilename, const std::string &stsFilename);
+
+class STS
+{
+public:
+	STS(const std::string &filename);
+	int64_t Run(float maxTime, EvaluatorIface *evaluator);
+
+private:
+	struct STSEntry
+	{
+		Board position;
+		std::string id;
+		std::map<Move, int> moveScores;
+	};
+
+	std::vector<STSEntry> m_entries;
+};
 
 }
 
