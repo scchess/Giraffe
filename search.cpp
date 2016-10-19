@@ -443,8 +443,6 @@ Score Search(RootSearchContext &context, std::vector<Move> &pv, Board &board, Sc
 	// we keep track of bestScore separately to fail soft on alpha
 	Score bestScore = std::numeric_limits<Score>::min();
 
-	size_t lastMoveBatched = 0;
-
 	for (size_t moveNum = 0; moveNum < miList.GetSize(); ++moveNum)
 	{
 		auto &mi = miList[moveNum];
