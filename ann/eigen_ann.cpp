@@ -63,7 +63,6 @@ NNMatrixRM ReadMatrix(std::istream &is)
 
 void EigenANN::FromString(const std::string &s)
 {
-	m_layers.clear();
 	m_stringRep = s;
 
 	std::stringstream ss(s);
@@ -76,37 +75,87 @@ void EigenANN::FromString(const std::string &s)
 	}
 	while (token != "EIGEN");
 
-	int numLayers;
-	ss >> numLayers;
+	m_module = ReadModule(ss);
+}
 
-	for (int i = 0; i < numLayers; ++i)
+std::unique_ptr<Module> ReadModule(std::istream &is)
+{
+	std::string layerType;
+	is >> layerType;
+
+	if (layerType == "nn.Sequential")
 	{
-		std::string layerType;
-		ss >> layerType;
+		int num_modules;
+		is >> num_modules;
+		std::unique_ptr<Sequential> seq(new Sequential);
 
-		if (layerType == "nn.Linear")
+		for (int i = 0; i < num_modules; ++i)
 		{
-			NNVector bias = ReadVector(ss);
-			NNMatrix weight = ReadMatrix(ss);
+			seq->AddModule(ReadModule(is));
+		}
 
-			m_layers.push_back(std::unique_ptr<Layer>(new LinearLayer(bias, weight)));
-		}
-		else if (layerType == "nn.ReLU")
+		return seq;
+	}
+	else if (layerType == "nn.SlicedParallel")
+	{
+		int num_modules;
+		is >> num_modules;
+		std::unique_ptr<SlicedParallel> par(new SlicedParallel);
+
+		int64_t offset = 0;
+		for (int i = 0; i < num_modules; ++i)
 		{
-			m_layers.push_back(std::unique_ptr<Layer>(new ReLULayer));
+			int64_t size;
+			is >> size;
+			par->AddModule(ReadModule(is), offset, size);
+			offset += size;
 		}
-		else if (layerType == "nn.Tanh")
-		{
-			m_layers.push_back(std::unique_ptr<Layer>(new TanhLayer));
-		}
-		else if (layerType == "nn.Identity")
-		{
-			// this is used for dropout
-			// ignore
-		}
-		else
-		{
-			std::cerr << "Layer type " << layerType << " not implemented!" << std::endl;
-		}
+
+		return par;
+	}
+	else if (layerType == "nn.Linear")
+	{
+		NNVector bias = ReadVector(is);
+		NNMatrix weight = ReadMatrix(is);
+
+		return std::unique_ptr<Module>(new LinearLayer(bias, weight));
+	}
+	else if (layerType == "nn.ReLU")
+	{
+		return std::unique_ptr<Module>(new ReLULayer);
+	}
+	else if (layerType == "nn.PReLU")
+	{
+		NNVector weight = ReadVector(is);
+		return std::unique_ptr<Module>(new PReLULayer(weight));
+	}
+	else if (layerType == "nn.Tanh")
+	{
+		return std::unique_ptr<Module>(new TanhLayer);
+	}
+	else if (layerType == "nn.Dropout")
+	{
+		return std::unique_ptr<Module>(new DropoutLayer);
+	}
+	else if (layerType == "nn.BatchNormalization")
+	{
+		float eps;
+		NNVector mean;
+		NNVector var;
+		NNVector weight;
+		NNVector bias;
+
+		is >> eps;
+		mean = ReadVector(is);
+		var = ReadVector(is);
+		weight = ReadVector(is);
+		bias = ReadVector(is);
+
+		return std::unique_ptr<Module>(new BatchNormLayer(eps, mean, var, weight, bias));
+	}
+	else
+	{
+		std::cerr << "Layer type " << layerType << " not implemented!" << std::endl;
+		assert(false);
 	}
 }
