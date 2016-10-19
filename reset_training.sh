@@ -1,5 +1,4 @@
 #!/bin/bash
 
-rm trainingResults/*
-rm training.log
-rm testing.log
+rm -f trainingResults/*
+rm -f training.log
