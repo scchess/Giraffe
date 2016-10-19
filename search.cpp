@@ -24,6 +24,7 @@
 
 #include <cstdint>
 
+#include "ann/ann_evaluator.h"
 #include "history.h"
 #include "types.h"
 #include "util.h"
@@ -49,10 +50,8 @@ namespace
 namespace Search
 {
 
-// this is mostly just to prevent overflow
-// this number multiplied by maximum node budget multiplier must be less than 2^63
 // it needs to be very high because node budget != node count (it also includes node counts for prunned nodes)
-static const NodeBudget ID_MAX_NODE_BUDGET = 200000000000000000LL;
+static const NodeBudget ID_MAX_NODE_BUDGET = std::numeric_limits<NodeBudget>::max() / 1000.0f;
 
 AsyncSearch::AsyncSearch(RootSearchContext &context)
 	: m_context(context)
@@ -170,17 +169,21 @@ void AsyncSearch::RootSearch_()
 			Board b = m_context.startBoard;
 			for (auto const &mv : latestResult.pv)
 			{
-				thinkingOutput.pv += b.MoveToAlg(mv) + ' ';
+				thinkingOutput.pv += b.MoveToAlg(mv, Board::SAN) + ' ';
+				b.ApplyMove(mv);
 			}
 
 			thinkingOutput.score = latestResult.score;
 			thinkingOutput.time = CurrentTime() - startTime;
 
-			m_context.thinkingOutputFunc(thinkingOutput);
+			if (m_context.thinkingOutputFunc)
+			{
+				m_context.thinkingOutputFunc(thinkingOutput);
 
-			std::cout << "# d: " << iteration <<
-						 " node budget: " << nodeBudget <<
-						 " NPS: " << (static_cast<float>(m_context.nodeCount) / thinkingOutput.time) << std::endl;
+				std::cout << "# d: " << iteration <<
+							 " node budget: " << nodeBudget <<
+							 " NPS: " << (static_cast<float>(m_context.nodeCount) / thinkingOutput.time) << std::endl;
+			}
 		}
 
 		m_context.onePlyDone = true;
@@ -203,7 +206,7 @@ void AsyncSearch::RootSearch_()
 		m_searchTimerThread.join();
 	}
 
-	if (m_context.searchType == SearchType_makeMove)
+	if (m_context.searchType == SearchType_makeMove && m_context.finalMoveFunc)
 	{
 		std::string bestMove = m_context.startBoard.MoveToAlg(m_rootResult.pv[0]);
 		m_context.finalMoveFunc(bestMove);
@@ -241,7 +244,7 @@ Score Search(RootSearchContext &context, std::vector<Move> &pv, Board &board, Sc
 
 	// switch to QSearch if we are out of nodes
 	// using < 1 guarantees that a root search with nodeBudget 1 will always do a full ply
-	if (nodeBudget < 1.0f || ply > MaxRecursionDepth)
+	if (nodeBudget < 1 || ply > MaxRecursionDepth)
 	{
 		TTEntry *tEntry = ENABLE_TT ? context.transpositionTable->Probe(board.GetHash()) : 0;
 
@@ -435,18 +438,17 @@ Score Search(RootSearchContext &context, std::vector<Move> &pv, Board &board, Sc
 		}
 	}
 
-	int numMovesSearched = -1;
-
 	std::vector<Move> subPv;
 
 	// we keep track of bestScore separately to fail soft on alpha
 	Score bestScore = std::numeric_limits<Score>::min();
 
-	for (auto &mi : miList)
-	{		
-		Move mv = mi.move;
+	size_t lastMoveBatched = 0;
 
-		++numMovesSearched;
+	for (size_t moveNum = 0; moveNum < miList.GetSize(); ++moveNum)
+	{
+		auto &mi = miList[moveNum];
+		Move mv = mi.move;
 
 		// this means move evaluator wants to prune this move
 		if (mi.nodeAllocation == 0.0f)
@@ -468,7 +470,7 @@ Score Search(RootSearchContext &context, std::vector<Move> &pv, Board &board, Sc
 
 		// only search the first move with full window, since everything else is expected to fail low
 		// if this is a null window search anyways, don't bother
-		if (ENABLE_PVS && numMovesSearched != 0 && ((beta - alpha) != 1) && nodeBudget > MinNodeBudgetForPVS)
+		if (ENABLE_PVS && moveNum != 0 && ((beta - alpha) != 1) && nodeBudget > MinNodeBudgetForPVS)
 		{
 			score = -Search(context, subPv, board, -alpha - 1, -alpha, childNodeBudget, ply + 1);
 
@@ -513,7 +515,7 @@ Score Search(RootSearchContext &context, std::vector<Move> &pv, Board &board, Sc
 				context.transpositionTable->Store(board, mv, score, originalNodeBudget, LOWERBOUND);
 			}
 
-			context.moveEvaluator->NotifyBestMove(board, si, miList, mv, numMovesSearched + 1);
+			context.moveEvaluator->NotifyBestMove(board, si, miList, mv, moveNum + 1);
 
 			// we don't want to store captures because those are searched before killers anyways
 			if (!board.IsViolent(mv))
@@ -768,7 +770,19 @@ SearchResult SyncSearchNodeLimited(const Board &b, NodeBudget nodeBudget, Evalua
 	context.stopRequest = false;
 	context.onePlyDone = false;
 
-	ret.score = Search(context, ret.pv, context.startBoard, SCORE_MIN, SCORE_MAX, nodeBudget, 0);
+	NodeBudget currentNodeBudget = 1;
+
+	while (currentNodeBudget <= nodeBudget)
+	{
+		ret.score = Search(context, ret.pv, context.startBoard, SCORE_MIN, SCORE_MAX, currentNodeBudget, 0);
+
+		if (currentNodeBudget == nodeBudget)
+		{
+			break;
+		}
+
+		currentNodeBudget = std::min<NodeBudget>(currentNodeBudget * NodeBudgetMultiplier, nodeBudget);
+	}
 
 	return ret;
 }
