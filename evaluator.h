@@ -80,6 +80,8 @@ public:
 
 	// this is optional
 	virtual void PrintDiag(Board &/*board*/) {}
+
+	virtual ~EvaluatorIface() {}
 };
 
 #endif // EVALUATOR_H
