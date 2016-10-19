@@ -126,6 +126,8 @@ public:
 	// implementations must override this function
 	// implementation can assume that list is already populated with legal moves of the correct type (QS vs non-QS)
 	virtual void EvaluateMoves(Board &board, SearchInfo &si, MoveInfoList &list, MoveList &ml) = 0;
+
+	virtual ~MoveEvaluatorIface() {}
 };
 
 #endif // MOVE_EVALUATOR_H
