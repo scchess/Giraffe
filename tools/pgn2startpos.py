@@ -5,14 +5,16 @@ import sys
 
 from chess import pgn
 
-if len(sys.argv) != 3:
-    print("Usage:", sys.argv[0], "<PGN file> <start position after # of moves>")
+if len(sys.argv) != 4:
+    print("Usage:", sys.argv[0], "<PGN file> <start position after # of moves> <unique only?>")
     sys.exit(1)
 
 if sys.argv[1] == '-':
     pgn = sys.stdin
 else:
     pgn = open(sys.argv[1])
+
+unique_only = (int(sys.argv[3]) != 0)
 
 numSkip = int(sys.argv[2])
 
@@ -29,7 +31,7 @@ while game:
 
     if node.variations:
         epd = node.board().epd()
-        if not epd in positionsSeen:
+        if not unique_only or not epd in positionsSeen:
             print(node.board().epd())
             positionsSeen.add(epd)
 
