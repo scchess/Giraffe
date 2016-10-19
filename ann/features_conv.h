@@ -22,6 +22,7 @@
 #include <string>
 #include <sstream>
 #include <set>
+#include <utility>
 
 #include "Eigen/Dense"
 
@@ -73,6 +74,8 @@ struct FeatureDescription
 	}
 };
 
+using GroupAllocations = std::vector<std::pair<int64_t /* size */, float /* reduction factor */>>;
+
 // convert to NN input format
 // T can either be float (to get actual values) or
 // FeatureDescription (to get feature descriptions)
@@ -87,6 +90,95 @@ inline int64_t GetNumFeatures()
 	FeaturesConv::ConvertBoardToNN(b, ret);
 
 	return static_cast<int64_t>(ret.size());
+}
+
+// Divide features into groups (this doesn't have to match actual groups in features)
+inline GroupAllocations GetBoardGroupAllocations()
+{
+	Board b;
+
+	std::vector<FeaturesConv::FeatureDescription> fds;
+	FeaturesConv::ConvertBoardToNN(b, fds);
+
+	GroupAllocations ret;
+
+	int current_group = 0; /* we know the first feature will be in the global0 group */
+	int current_group_size = 0;
+
+	for (const auto &fd : fds)
+	{
+		int group = 0;
+
+		if (fd.group == 0)
+		{
+			group = 0;
+		}
+		else if (fd.group == 1)
+		{
+			/* pawn group */
+			group = 1;
+		}
+		else if (fd.featureType != FeatureDescription::FeatureType_pos)
+		{
+			group = 2; // other globals
+		}
+		else
+		{
+			group = 3; // square features
+		}
+
+		if (group == current_group)
+		{
+			++current_group_size;
+		}
+		else
+		{
+			float reduction_factor = 0.25f;
+
+			if (current_group == 0)
+			{
+				// first global group is very important
+				reduction_factor = 1.0f;
+			}
+			else if (current_group == 1)
+			{
+				// the pawn group is huge
+				reduction_factor = 0.2f;
+			}
+			else if (current_group == 3)
+			{
+				// there are many square features
+				reduction_factor = 0.15f;
+			}
+
+			ret.push_back(std::pair<int64_t, float>(current_group_size, reduction_factor));
+			current_group = group;
+			current_group_size = 1;
+		}
+	}
+
+	float reduction_factor = 0.25f;
+
+	if (current_group == 0)
+	{
+		// first global group is very important
+		reduction_factor = 1.0f;
+	}
+	else if (current_group == 1)
+	{
+		// the pawn group is huge
+		reduction_factor = 0.2f;
+	}
+	else if (current_group == 3)
+	{
+		// there are many square features
+		reduction_factor = 0.15f;
+	}
+
+	// last group
+	ret.push_back(std::pair<int64_t, float>(current_group_size, reduction_factor));
+
+	return ret;
 }
 
 // additional info for conversion
