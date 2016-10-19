@@ -45,6 +45,8 @@ public:
 
 	void MoveMade();
 
+	void Clear();
+
 private:
 	// this is indexed by ply
 	std::vector<KillerSlot> m_killerMoves;
