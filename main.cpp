@@ -43,6 +43,7 @@
 #include "gtb.h"
 #include "move_evaluator.h"
 #include "static_move_evaluator.h"
+#include "move_stats/move_stats.h"
 
 #include "Eigen/Dense"
 
@@ -183,13 +184,13 @@ int main(int argc, char **argv)
 	{
 		InitializeSlowBlocking(evaluator, mevaluator);
 
-		if (argc < 3)
+		if (argc < 4)
 		{
-			std::cout << "Usage: " << argv[0] << " tdl positions" << std::endl;
+			std::cout << "Usage: " << argv[0] << " tdl positions sts_filename" << std::endl;
 			return 0;
 		}
 
-		Learn::TDL(argv[2]);
+		Learn::TDL(argv[2], argv[3]);
 
 		return 0;
 	}
@@ -384,37 +385,49 @@ int main(int argc, char **argv)
 			ANNEvaluator evaluatorCopy;
 			evaluatorCopy.FromString(evaluatorParams);
 
-			#pragma omp for schedule(dynamic)
+			uint64_t numThreadPositionsDone = 0;
+
+			#pragma omp for schedule(dynamic, 4096)
 			for (size_t i = 0; i < fens.size(); ++i)
 			{
 				Board b(fens[i]);
 
-				Search::SearchResult result = Search::SyncSearchNodeLimited(b, 100000, &evaluatorCopy, &gStaticMoveEvaluator, nullptr, nullptr);
+				Search::SearchResult result = Search::SyncSearchNodeLimited(b, 1000, &evaluatorCopy, &gStaticMoveEvaluator, nullptr, nullptr);
 
 				bm[i] = b.MoveToAlg(result.pv[0]);
 
-				#pragma omp critical(numPositionsAndOutputFileUpdate)
+				++numThreadPositionsDone;
+
+				if (numThreadPositionsDone % 256 == 0)
 				{
-					++numPositionsDone;
-
-					outfile << fens[i] << std::endl;
-					outfile << bm[i] << std::endl;
-
-					if (omp_get_thread_num() == 0)
+					#pragma omp critical(numPositionsAndOutputFileUpdate)
 					{
-						double currentTime = CurrentTime();
-						double timeDiff = currentTime - lastPrintTime;
-						if (timeDiff > 1.0)
-						{
-							std::cout << numPositionsDone << '/' << fens.size() << std::endl;
-							std::cout << "Positions per second: " << static_cast<double>(numPositionsDone - lastDoneCount) / timeDiff << std::endl;
+						numPositionsDone += numThreadPositionsDone;
 
-							lastPrintTime = currentTime;
-							lastDoneCount = numPositionsDone;
+						if (omp_get_thread_num() == 0)
+						{
+							double currentTime = CurrentTime();
+							double timeDiff = currentTime - lastPrintTime;
+							if (timeDiff > 1.0)
+							{
+								std::cout << numPositionsDone << '/' << fens.size() << std::endl;
+								std::cout << "Positions per second: " << static_cast<double>(numPositionsDone - lastDoneCount) / timeDiff << std::endl;
+
+								lastPrintTime = currentTime;
+								lastDoneCount = numPositionsDone;
+							}
 						}
 					}
+
+					numThreadPositionsDone = 0;
 				}
 			}
+		}
+
+		for (size_t i = 0; i < fens.size(); ++i)
+		{
+			outfile << fens[i] << std::endl;
+			outfile << bm[i] << std::endl;
 		}
 
 		return 0;
@@ -490,6 +503,20 @@ int main(int argc, char **argv)
 		meval.Test(fensTest, bestMovesTest);
 
 		meval.Serialize(argv[3]);
+
+		return 0;
+	}
+	else if (argc >= 2 && std::string(argv[1]) == "move_stats")
+	{
+		InitializeSlowBlocking(evaluator, mevaluator);
+
+		if (argc < 3)
+		{
+			std::cout << "Usage: " << argv[0] << " move_stats <labeled FEN>" << std::endl;
+			return 0;
+		}
+
+		MoveStats::ProcessStats(argv[2]);
 
 		return 0;
 	}
@@ -710,6 +737,22 @@ int main(int argc, char **argv)
 		{
 			// for debugging, not in xboard protocol
 			backend.DebugPrintBoard();
+
+			MoveList moves;
+			backend.GetBoard().GenerateAllLegalMoves<Board::ALL>(moves);
+
+			// Print legal moves and test the generator and parser while we are at it
+			// for (const auto &mv : moves)
+			// {
+			// 	std::string str = backend.GetBoard().MoveToAlg(mv, Board::SAN);
+			// 	assert(backend.GetBoard().ParseMove(str) == mv);
+			// 	std::cout << str << std::endl;
+			// }
+		}
+		else if (cmd == "mirror")
+		{
+			auto board = backend.GetBoard().GetMirroredPosition();
+			std::cout << board.PrintBoard() << std::endl;
 		}
 		else if (cmd == "perft")
 		{
@@ -740,7 +783,8 @@ int main(int argc, char **argv)
 		else if (cmd == "runtests")
 		{
 			//SEE::DebugRunSeeTests();
-			DebugRunPerftTests();
+			//DebugRunPerftTests();
+			DebugRunSANTests();
 			std::cout << "All passed!" << std::endl;
 		}
 		else if (cmd == "gee")
@@ -831,6 +875,17 @@ int main(int argc, char **argv)
 			{
 				std::cout << "Error: option requires value" << std::endl;
 			}
+		}
+		else if (cmd == "runsts")
+		{
+			std::string filename;
+			float timePerPosition;
+			line >> filename >> timePerPosition;
+
+			Learn::STS sts(filename);
+			auto score = sts.Run(timePerPosition, &evaluator);
+
+			std::cout << "Score: " << score << std::endl;
 		}
 		else if (backend.IsAMove(cmd))
 		{
