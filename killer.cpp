@@ -94,9 +94,19 @@ void Killer::GetKillers(KillerMoveList &moveList, int32_t ply)
 void Killer::MoveMade()
 {
 	// if a move is made, we decrement all plies
-
 	for (size_t ply = 1; ply < m_killerMoves.size(); ++ply)
 	{
 		m_killerMoves[ply - 1] = m_killerMoves[ply];
+	}
+}
+
+void Killer::Clear()
+{
+	for (auto &slot : m_killerMoves)
+	{
+		for (size_t i = 0; i < NUM_KILLER_MOVES_PER_PLY; ++i)
+		{
+			slot.moves[i] = 0;
+		}
 	}
 }
