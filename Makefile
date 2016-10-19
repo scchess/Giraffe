@@ -1,29 +1,40 @@
-CXX=g++-5
-
-# this is used to build gtb only
-CC=gcc-5
-
+HAS_TORCH=1
 TORCH_DIR=~/torch/install
+
+ifndef CXX
+	CXX=g++
+endif
+
+ifndef CC
+	# this is used to build gtb only
+	CC=gcc
+endif
 
 HGVERSION:= $(shell hg parents --template '{node|short}')
 
 CXXFLAGS_BASE = \
-	-Wall -Wextra -Wno-unused-function -std=gnu++11 -mtune=native -Wa,-q -ffast-math \
-	-pthread -fopenmp -DHGVERSION="\"${HGVERSION}\"" -I $(TORCH_DIR)/include
+	-Wall -Wextra -Wno-unused-function -std=gnu++11 -mtune=native -ffast-math \
+	-pthread -fopenmp -DHGVERSION="\"${HGVERSION}\""
 
 # we will then extend this one with optimization flags
 CXXFLAGS:= $(CXXFLAGS_BASE)
-	
+
 CXXFLAGS_DEP = \
 	-std=gnu++11
 
-LDFLAGS=-L. -L $(TORCH_DIR)/lib -Lgtb -lm -lgtb
+LDFLAGS=-L. -Lgtb -lm -lgtb
 
-# for LuaJIT
-LDFLAGS += -lluaT -lTH -lluajit
-
-#for LUA 5.2
-#LDFLAGS += -lluaT -lTH -llua
+ifeq ($(HAS_TORCH), 1)
+	LDFLAGS += -L $(TORCH_DIR)/lib
+	
+	# for LuaJIT
+	LDFLAGS += -lluaT -lTH -lluajit
+	
+	#for LUA 5.2
+	#LDFLAGS += -lluaT -lTH -llua
+	
+	CXXFLAGS += -DHAS_TORCH -I $(TORCH_DIR)/include
+endif
 
 ifeq ($(PG), 1)
 	CXXFLAGS += -g -Os -pg
@@ -44,7 +55,8 @@ endif
 CXXFILES := \
 	$(wildcard *.cpp) \
 	$(wildcard ann/*.cpp) \
-	$(wildcard eval/*.cpp)
+	$(wildcard eval/*.cpp) \
+	$(wildcard move_stats/*.cpp)
 
 INCLUDES=-I.
 
@@ -97,6 +109,7 @@ test:
 	
 clean:
 	-$(Q) rm -f $(DEPS) $(OBJS) $(EXE)
+	$(Q) cd gtb && make clean
 	
 windows:
 	$(Q) cd gtb && make windows_clean && make CFLAGS=-m32
