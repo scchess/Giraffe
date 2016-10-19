@@ -6,6 +6,8 @@ import matplotlib.pyplot as plt
 
 OUTPUT_FILENAME = '/var/www/html/plot.png'
 
+plt.rcParams["figure.figsize"] = [15, 8]
+
 if len(sys.argv) < 2:
 	print("Usage: " + sys.argv[0] + " <file1> <file2> ...")
 	sys.exit()
@@ -15,21 +17,16 @@ for i in xrange(1, len(sys.argv)):
 	data = []
 
 	with open(filename, 'rb') as csvFile:
-		reader = csv.reader(csvFile, delimiter=',')
+		reader = csv.reader(csvFile, delimiter=' ')
 		for row in reader:
-			if (len(row) == 3):
-				time = row[1].strip()
-				score = row[2].strip()
-			else:
-				# old format without iteration count
-				time = row[0].strip()
-				score = row[1].strip()
+			time = row[2].strip()
+			score = row[3].strip()
 
 			data.append([float(time), float(score)])
 
-	dataArray = np.asarray(data, dtype=np.float32)
-
-	plt.plot(dataArray[:, 0], dataArray[:, 1], label=filename)
+	if len(data) > 0:
+		dataArray = np.asarray(data, dtype=np.float32)
+		plt.plot(dataArray[:, 0], dataArray[:, 1], label=filename)
 
 plt.xlabel('Time (s)')
 plt.ylabel('STS score (0.1s)')
