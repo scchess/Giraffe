@@ -23,6 +23,8 @@
 #include <algorithm>
 #include <random>
 #include <functional>
+#include <chrono>
+#include <thread>
 
 #include <cmath>
 
@@ -41,6 +43,7 @@
 #include "ann/ann_evaluator.h"
 #include "move_evaluator.h"
 #include "static_move_evaluator.h"
+#include "gtb.h"
 #include "util.h"
 #include "stats.h"
 
@@ -65,12 +68,17 @@ bool fileExists(const std::string &filename)
 	return is.good();
 }
 
+void clearLineAndReturn()
+{
+	std::cout << "                                     \r";
+}
+
 }
 
 namespace Learn
 {
 
-void TDL(const std::string &positionsFilename)
+void TDL(const std::string &positionsFilename, const std::string &stsFilename)
 {
 	std::cout << "Starting TDL training..." << std::endl;
 
@@ -101,9 +109,14 @@ void TDL(const std::string &positionsFilename)
 	std::cout << "Number of features: " << numFeatures << std::endl;
 
 	ANNEvaluator annEval;
-	annEval.BuildANN(numFeatures);
+	annEval.BuildANN();
+	//annEval.BuildEnsemble();
 
 	std::cout << "Eval net built" << std::endl;
+
+	std::cout << "Loading STS" << std::endl;
+	STS sts(stsFilename);
+	std::cout << "STS loaded" << std::endl;
 
 	int32_t iteration = 0;
 	double timeOffset = 0.0f;
@@ -133,11 +146,16 @@ void TDL(const std::string &positionsFilename)
 		{
 			++iteration;
 
-			annEval = ANNEvaluator(lastWrittenFileName);
+			ANNEvaluator lastEval(lastWrittenFileName);
+
+			annEval.FromString(lastEval.ToString());
+			//annEval.LoadEnsemble(lastWrittenFileName);
 
 			std::cout << "Restarting from iteration " << iteration << " last eval file: " << lastWrittenFileName << std::endl;
 		}
 	}
+
+	std::vector<std::unique_ptr<ANNEvaluator>> threadEvaluators(omp_get_max_threads());
 
 	double startTime = CurrentTime() - timeOffset;
 
@@ -161,9 +179,7 @@ void TDL(const std::string &positionsFilename)
 			// material eval to bootstrap
 
 			NNMatrixRM trainingBatch(PositionsFirstIteration, numFeatures);
-			NNMatrixRM trainingTargets;
-
-			trainingTargets.resize(trainingBatch.rows(), 1);
+			NNMatrixRM trainingTargets(trainingBatch.rows(), 1);
 
 			std::vector<float> features;
 
@@ -181,10 +197,16 @@ void TDL(const std::string &positionsFilename)
 				FeaturesConv::ConvertBoardToNN(b, features);
 
 				trainingBatch.block(row, 0, 1, trainingBatch.cols()) = MapStdVector(features);
+
+				if (b.GetSideToMove() == BLACK)
+				{
+					val *= -1;
+				}
+
 				trainingTargets(row, 0) = Eval::gStaticEvaluator.UnScale(val);
 			}
 
-			for (size_t i = 0; i < 10; ++i)
+			for (size_t i = 0; i < 3; ++i)
 			{
 				float lossSum = 0.0f;
 				int64_t numBatches = 0;
@@ -192,23 +214,22 @@ void TDL(const std::string &positionsFilename)
 				{
 					auto xBlock = trainingBatch.block(start, 0, SgdBatchSize, trainingBatch.cols());
 					auto targetsBlock = trainingTargets.block(start, 0, SgdBatchSize, 1);
+					//lossSum += annEval.TrainWithEnsemble(xBlock, targetsBlock);
 					lossSum += annEval.Train(xBlock, targetsBlock);
 					++numBatches;
 				}
-				std::cout << "Iteration " << i << " loss: " << lossSum / numBatches << std::endl;
+				std::cout << "Epoch " << i << " loss: " << lossSum / numBatches << std::endl;
 			}
 		}
 		else
 		{
-			std::vector<std::string> positions;
-			std::vector<float> targets;
-
-			int64_t numPositionsApprox = iteration < NumEarlyIteartions ? PositionsEarlyIterations : PositionsPerIteration;
-			int64_t numRootPositions = numPositionsApprox / HalfMovesToMake;
-
-			std::cout << "Generating training positions..." << std::endl;
+			//int64_t numPositionsApprox = iteration < NumEarlyIteartions ? PositionsEarlyIterations : PositionsPerIteration;
+			int64_t numRootPositions = PositionsPerIteration / HalfMovesToMake;
 
 			auto annParams = annEval.ToString();
+
+			std::vector<std::string> positions;
+			std::vector<float> targets;
 
 			#pragma omp parallel
 			{
@@ -216,14 +237,22 @@ void TDL(const std::string &positionsFilename)
 				TTable ttable(1*MB); // we want the ttable to fit in L3
 				History history;
 
+				ttable.InvalidateAllEntries();
+
 				auto rng = gRd.MakeMT();
 				auto positionDist = std::uniform_int_distribution<size_t>(0, rootPositions.size() - 1);
 				auto positionDrawFunc = std::bind(positionDist, rng);
 
-				ttable.InvalidateAllEntries();
+				auto thread_id = omp_get_thread_num();
+				assert(static_cast<size_t>(thread_id) < threadEvaluators.size());
+
+				if (threadEvaluators[thread_id].get() == nullptr)
+				{
+					threadEvaluators[thread_id] = std::unique_ptr<ANNEvaluator>(new ANNEvaluator(true /* Eigen-only */));
+				}
 
 				// make a copy of the evaluator because evaluator is not thread-safe
-				ANNEvaluator annEvalThread(true /* Eigen-only */);
+				ANNEvaluator &annEvalThread = *threadEvaluators[thread_id];
 				annEvalThread.FromString(annParams);
 
 				std::vector<std::string> threadPositions;
@@ -232,12 +261,16 @@ void TDL(const std::string &positionsFilename)
 				// FEN, search score (from white), leaf color
 				std::vector<std::tuple<std::string, float, Color>> playout;
 
-				#pragma omp for schedule(dynamic, 64)
+				#pragma omp for schedule(dynamic, 1)
 				for (int64_t rootPosNum = 0; rootPosNum < numRootPositions; ++rootPosNum)
 				{
 					Board pos = Board(rootPositions[positionDrawFunc()]);
 
-					if (pos.GetGameStatus() == Board::ONGOING && (rootPosNum % 2) == 0)
+					killer.Clear();
+					ttable.ClearTable();
+					history.Clear();
+
+					if (pos.GetGameStatus() == Board::ONGOING)
 					{
 						// make 1 random move
 						// it's very important that we make an odd number of moves, so that if the move is something stupid, the
@@ -276,86 +309,253 @@ void TDL(const std::string &positionsFilename)
 						ttable.AgeTable();
 						history.NotifyMoveMade();
 
-						if (pos.GetGameStatus() != Board::ONGOING)
+						if (pos.GetGameStatus() != Board::ONGOING || IsMateScore(result.score) || IsDrawScore(result.score))
 						{
 							break;
 						}
 					}
 
-					for (size_t i = 0; i < playout.size(); ++i)
+					for (size_t i = 0; i < (playout.size() - 1); ++i)
 					{
 						float target = std::get<1>(playout[i]);
 						float diffWeight = TDLambda;
 
-						for (size_t j = i + 1; j < playout.size(); ++j)
+						for (size_t j = /*i + 1*/ i + 2; j < playout.size(); /*++j*/ j += 2)
 						{
-							float scoreDiff = std::get<1>(playout[j]) - std::get<1>(playout[j - 1]);
+							float scoreDiff = std::get<1>(playout[j]) - std::get<1>(playout[/*j - 1*/ j - 2]);
 							target += scoreDiff * diffWeight;
 							diffWeight *= TDLambda;
 						}
 
 						threadPositions.push_back(std::get<0>(playout[i]));
-						threadTargets.push_back(target * (std::get<2>(playout[i]) == WHITE ? 1.0f : -1.0f));
+						threadTargets.push_back(target);
+
+						// push the mirrored position as well
+						// Board b(std::get<0>(playout[i]));
+						// threadPositions.push_back(b.GetMirroredPosition().GetFen());
+						// threadTargets.push_back(-target);
 					}
 				}
 
 				#pragma omp critical (mergeTrainingExamples)
 				{
-					positions.insert(positions.end(), std::make_move_iterator(threadPositions.begin()), std::make_move_iterator(threadPositions.end()));
-					targets.insert(targets.end(), std::make_move_iterator(threadTargets.begin()), std::make_move_iterator(threadTargets.end()));
+					positions.insert(positions.end(),
+									 std::make_move_iterator(threadPositions.begin()),
+									 std::make_move_iterator(threadPositions.end()));
+					targets.insert(targets.end(),
+								   std::make_move_iterator(threadTargets.begin()),
+								   std::make_move_iterator(threadTargets.end()));
+				}
+			}
+			
+			double optimizationStartTime = CurrentTime();
+			float error = 0.0f;
+
+			NNMatrixRM trainingFeatures(static_cast<int64_t>(positions.size()), numFeatures);
+
+			#pragma omp parallel
+			{
+				std::vector<float> featureConvTemp;
+
+				#pragma omp for
+				for (size_t i = 0; i < positions.size(); ++i)
+				{
+					Board b(positions[i]);
+					FeaturesConv::ConvertBoardToNN(b, featureConvTemp);
+					trainingFeatures.block(static_cast<int64_t>(i), 0, 1, numFeatures) = MapStdVector(featureConvTemp);
 				}
 			}
 
-			std::cout << "Optimizing..." << std::endl;
+			annEval.ResetOptimizer();
 
-			double optimizationStartTime = CurrentTime();
+			int64_t numSgdIterationsPerEpoch = positions.size() / SgdBatchSize + 1;
 
-			NNMatrixRM trainingBatch(SgdBatchSize, numFeatures);
+			NNMatrixRM trainingFeaturesBatch(SgdBatchSize, numFeatures);
 			NNMatrixRM targetsBatch(SgdBatchSize, 1);
 
-			auto trainingPositionRng = gRd.MakeMT();
-			auto trainingPositionDist = std::uniform_int_distribution<size_t>(0, positions.size() - 1);
-			auto trainingPositionDrawFunc = std::bind(trainingPositionDist, trainingPositionRng);
+			auto batchRng = gRd.MakeMT();
+			auto batchDist = std::uniform_int_distribution<size_t>(0, positions.size() - 1);
+			auto batchDrawFunc = std::bind(batchDist, batchRng);
 
-			float totalError = 0.0f;
-			int64_t sgdIterations = positions.size() / SgdBatchSize * SgdEpochs;
-
-			for (int64_t sgdStep = 0; sgdStep < sgdIterations; ++sgdStep)
+			for (int64_t epoch = 0; epoch < SgdEpochs; ++epoch)
 			{
-				#pragma omp parallel
-				{
-					std::vector<float> featureConvTemp;
+				float totalError = 0.0f;
 
-					#pragma omp for
-					for (int64_t sampleNumInBatch = 0; sampleNumInBatch < SgdBatchSize; ++sampleNumInBatch)
+				for (int64_t sgdIteration = 0; sgdIteration < numSgdIterationsPerEpoch; ++sgdIteration)
+				{
+					for (int64_t sample = 0; sample < SgdBatchSize; ++sample)
 					{
-						size_t positionIdx = trainingPositionDrawFunc();
-						Board b(positions[positionIdx]);
-						FeaturesConv::ConvertBoardToNN(b, featureConvTemp);
-						trainingBatch.block(sampleNumInBatch, 0, 1, numFeatures) = MapStdVector(featureConvTemp);
-						targetsBatch(sampleNumInBatch, 0) = targets[positionIdx];
+						int64_t row = batchDrawFunc();
+						trainingFeaturesBatch.row(sample) = trainingFeatures.row(row);
+						targetsBatch(sample, 0) = targets[row];
 					}
+				
+					error = annEval.Train(trainingFeaturesBatch, targetsBatch);
+					totalError += error;
+					//error = annEval.TrainWithEnsemble(trainingFeaturesBatch, targetsBatch);
 				}
 
-				totalError += annEval.Train(trainingBatch, targetsBatch);
+				std::cout << "Epoch error: " << (totalError / numSgdIterationsPerEpoch) << std::endl;
 			}
 
-			std::cout << "Average error: " << (totalError / sgdIterations) << std::endl;
-			std::cout << "Optimization time: " << (CurrentTime() - optimizationStartTime) << std::endl;
-			std::cout << "Total time: " << (CurrentTime() - startTime) << std::endl;
-			std::cout << "Iteration took: " << (CurrentTime() - iterationStartTime) << std::endl;
-		}
 
-		if ((iteration % EvaluatorSerializeInterval) == 0)
-		{
-			std::cout << "Serializing " << getFilename(iteration) << "..." << std::endl;
+			if ((iteration % EvaluatorSerializeInterval) == 0)
+			{
+				std::cout << "Optimization time: " << (CurrentTime() - optimizationStartTime) << std::endl;
+				std::cout << "Total time: " << (CurrentTime() - startTime) << std::endl;
+				std::cout << "Iteration took: " << (CurrentTime() - iterationStartTime) << std::endl;
 
-			annEval.Serialize(getFilename(iteration));
+				std::cout << "Serializing " << getFilename(iteration) << "..." << std::endl;
 
-			trainingLogFile << iteration << ' ' << getFilename(iteration) << ' ' << (CurrentTime() - startTime) << std::endl;
-			trainingLogFile.flush();
+				annEval.Serialize(getFilename(iteration));
+				annEval.SaveEnsemble(getFilename(iteration));
+
+				std::cout << "Testing on STS..." << std::endl;
+				auto stsScore = sts.Run(0.1f, &annEval);
+				std::cout << "Score: " << stsScore << std::endl;
+
+				trainingLogFile << iteration << ' ' << getFilename(iteration) << ' ' << (CurrentTime() - startTime) << ' ' << stsScore << std::endl;
+				trainingLogFile.flush();
+
+				// Sleep a bit to give plot.py time to run. This is purely cosmetic.
+				std::this_thread::sleep_for(std::chrono::seconds(2));
+			}
 		}
 	}
+}
+
+namespace
+{
+
+std::vector<std::string> split(const std::string &s, char delim)
+{
+	std::vector<std::string> ret;
+	std::stringstream ss(s);
+	std::string str;
+
+	while (std::getline(ss, str, delim))
+	{
+		ret.push_back(str);
+	}
+
+	return ret;
+}
+
+std::string trim(const std::string &input)
+{
+	auto start = input.find_first_not_of(" \t");
+	auto len = input.find_last_not_of(" \t") - start + 1;
+	return input.substr(start, len);
+}
+
+}
+
+STS::STS(const std::string &filename)
+{
+	std::ifstream stsFile(filename);
+
+	if (!stsFile)
+	{
+		std::cerr << "Failed to open " << filename << " for reading" << std::endl;
+		assert(false);
+	}
+
+	std::string line;
+	while (std::getline(stsFile, line))
+	{
+		STSEntry entry;
+		std::stringstream ss(line);
+		std::string field;
+		while (std::getline(ss, field, ';'))
+		{
+			field = trim(field);
+
+			if (field.find('\"') == std::string::npos)
+			{
+				entry.position = Board(field);
+			}
+			else if (field.substr(0, 2) == "id")
+			{
+				field = field.substr(4, field.size() - 5);
+				entry.id = field;
+			}
+			else if (field.substr(0, 2) == "c0")
+			{
+				field = field.substr(4, field.size() - 5);
+				auto moveScores = split(field, ',');
+				for (auto &s : moveScores)
+				{
+					auto p = split(s, '=');
+					Move mv = entry.position.ParseMove(trim(p[0]));
+					entry.moveScores[mv] = ParseStr<int>(trim(p[1]));
+				}
+			}
+		}
+
+		m_entries.push_back(entry);
+	}
+}
+
+int64_t STS::Run(float maxTime, EvaluatorIface *evaluator)
+{
+	std::atomic<int> finalScore = {0};
+
+	if (!evaluator->IsANNEval())
+	{
+		std::cerr << "Only ANN evaluator is supported" << std::endl;
+	}
+
+	ANNEvaluator *annEval = reinterpret_cast<ANNEvaluator*>(evaluator);
+
+	std::string evaluatorString = annEval->ToString();
+
+	#pragma omp parallel
+	{
+		std::unique_ptr<TTable> ttable_u(new TTable(1 * MB));
+		Killer killer;
+		History history;
+		ANNEvaluator threadEval(true);
+		threadEval.FromString(evaluatorString);
+
+		#pragma omp barrier
+
+		#pragma omp for
+		for (size_t i = 0; i < m_entries.size(); ++i)
+		{
+			Search::RootSearchContext context;
+
+			context.timeAlloc = { maxTime, maxTime };
+			context.searchType = Search::SearchType_makeMove;
+			context.nodeBudget = 0;
+			context.transpositionTable = ttable_u.get();
+			context.killer = &killer;
+			context.history = &history;
+			context.evaluator = &threadEval;
+			context.moveEvaluator = &gStaticMoveEvaluator;
+			context.stopRequest = false;
+
+			context.startBoard = m_entries[i].position;
+
+			Search::AsyncSearch search(context);
+			search.Start();
+			search.Join();
+
+			Move returnedMove = search.GetResult().pv[0];
+
+			if (returnedMove == 0)
+			{
+				std::cerr << "Search did not return a result!" << std::endl;
+			}
+
+			auto it = m_entries[i].moveScores.find(returnedMove);
+			if (it != m_entries[i].moveScores.end())
+			{
+				finalScore += it->second;
+			}
+		}
+	}
+
+	return finalScore;
 }
 
 }
