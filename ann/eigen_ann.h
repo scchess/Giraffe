@@ -29,7 +29,7 @@
 
 #include "matrix_ops.h"
 
-class Layer
+class Module
 {
 public:
 	virtual NNMatrixRM *Forward(NNMatrixRM *input) = 0;
@@ -41,43 +41,37 @@ public:
 class EigenANN
 {
 public:
-	EigenANN() {}
+	EigenANN(bool /*eigenOnly*/ = false) {}
 	EigenANN(const std::string &filename)
 	{
 		Load(filename);
 	}
 
-	EigenANN(const std::string &/*functionName*/, int /*numInputs*/) { throw std::logic_error("Not supported"); }
+	EigenANN(const std::string &/*functionName*/, int /*numInputs*/) {}
+	EigenANN(const std::string &/*functionName*/, int /*numInputs*/, 
+			 const std::vector<int64_t> &/*slices*/, const std::vector<float> &/*reductionFactors*/)
+	{}
 
 	template <typename Derived>
 	float ForwardSingle(const Eigen::MatrixBase<Derived> &v)
 	{
 		m_inputSingle = v;
-		NNVector *x = &m_inputSingle;
+		NNVector *ret = m_module->ForwardSingle(&m_inputSingle);
 
-		for (auto &layer : m_layers)
-		{
-			x = layer->ForwardSingle(x);
-		}
-
-		return (*x)(0, 0);
+		return (*ret)(0, 0);
 	}
 
 	template <typename Derived>
-	NNMatrixRM *ForwardMultiple(const Eigen::MatrixBase<Derived> &matrix)
+	NNMatrixRM *ForwardMultiple(const Eigen::MatrixBase<Derived> &x, bool useTorch = false)
 	{
-		m_input = matrix;
-		NNMatrixRM *x = &m_input;
-
-		for (auto &layer : m_layers)
-		{
-			x = layer->Forward(x);
-		}
-
-		return x;
+		assert(!useTorch);
+		m_input = x;
+		return m_module->Forward(&m_input);
 	}
 
 	float Train(const NNMatrixRM &/*x*/, const NNMatrixRM &/*t*/) { throw std::logic_error("Not supported"); }
+
+	void ResetOptimizer() { throw std::logic_error("Not supported"); }
 
 	void Load(const std::string &filename)
 	{
@@ -93,14 +87,112 @@ public:
 	void FromString(const std::string &s);
 
 private:
-	std::vector<std::unique_ptr<Layer>> m_layers;
+	std::unique_ptr<Module> m_module;
 	std::string m_stringRep;
 
 	NNVector m_inputSingle;
 	NNMatrixRM m_input;
 };
 
-class LinearLayer : public Layer
+std::unique_ptr<Module> ReadModule(std::istream &is);
+
+class Sequential : public Module
+{
+public:
+	NNMatrixRM *Forward(NNMatrixRM *input) override {
+		NNMatrixRM *x = input;
+		for (auto &module : m_modules)
+		{
+			x = module->Forward(x);
+		}
+
+		return x;
+	}
+
+	NNVector *ForwardSingle(NNVector *input) override {
+		NNVector *v = input;
+		for (auto &module : m_modules)
+		{
+			v = module->ForwardSingle(v);
+		}
+
+		return v;
+	}
+
+	void AddModule(std::unique_ptr<Module> &&mod)
+	{
+		m_modules.push_back(std::move(mod));
+	}
+
+private:
+	std::vector<std::unique_ptr<Module>> m_modules;
+};
+
+class SlicedParallel : public Module
+{
+public:
+	NNMatrixRM *Forward(NNMatrixRM *input) override {
+		int64_t offset = 0;
+		for (size_t i = 0; i < m_modules.size(); ++i)
+		{
+			m_slices[i] = input->middleCols(m_sliceIndices[i], m_sliceSizes[i]);
+			NNMatrixRM *modOutput = m_modules[i]->Forward(&m_slices[i]);
+
+			m_output.resize(modOutput->rows(), Eigen::NoChange);
+
+			if (m_output.cols() < (offset + modOutput->cols()))
+			{
+				m_output.conservativeResize(Eigen::NoChange, offset + modOutput->cols());
+			}
+
+			m_output.middleCols(offset, modOutput->cols()) = *modOutput;
+			offset += modOutput->cols();
+		}
+
+		return &m_output;
+	}
+
+	NNVector *ForwardSingle(NNVector *input) override {
+		int64_t offset = 0;
+		for (size_t i = 0; i < m_modules.size(); ++i)
+		{
+			m_slicesSingle[i] = input->middleCols(m_sliceIndices[i], m_sliceSizes[i]);
+			NNVector *modOutput = m_modules[i]->ForwardSingle(&m_slicesSingle[i]);
+
+			if (m_outputSingle.cols() < (offset + modOutput->cols()))
+			{
+				m_outputSingle.conservativeResize(Eigen::NoChange, offset + modOutput->cols());
+			}
+
+			m_outputSingle.middleCols(offset, modOutput->cols()) = *modOutput;
+			offset += modOutput->cols();
+		}
+
+		return &m_outputSingle;
+	}
+
+	void AddModule(std::unique_ptr<Module> &&mod, int64_t sliceIndex, int64_t sliceSize)
+	{
+		m_modules.push_back(std::move(mod));
+		m_sliceIndices.push_back(sliceIndex);
+		m_sliceSizes.push_back(sliceSize);
+		m_slices.resize(m_sliceIndices.size());
+		m_slicesSingle.resize(m_sliceIndices.size());
+	}
+
+private:
+	std::vector<std::unique_ptr<Module>> m_modules;
+	std::vector<int64_t> m_sliceIndices;
+	std::vector<int64_t> m_sliceSizes;
+
+	std::vector<NNMatrixRM> m_slices;
+	std::vector<NNVector> m_slicesSingle;
+
+	NNMatrixRM m_output;
+	NNVector m_outputSingle;
+};
+
+class LinearLayer : public Module
 {
 public:
 	LinearLayer(const NNVector &bias, const NNMatrixRM &weight)
@@ -125,7 +217,20 @@ private:
 	NNVector m_outputSingle;
 };
 
-class ReLULayer : public Layer
+class DropoutLayer : public Module
+{
+public:
+	// DropOut is no-op at evaluation time (output is scaled during training).
+	NNMatrixRM *Forward(NNMatrixRM *input) override {
+		return input;
+	}
+
+	NNVector *ForwardSingle(NNVector *input) override {
+		return input;
+	}
+};
+
+class ReLULayer : public Module
 {
 public:
 	NNMatrixRM *Forward(NNMatrixRM *input) override {
@@ -139,7 +244,31 @@ public:
 	}
 };
 
-class TanhLayer : public Layer
+class PReLULayer : public Module
+{
+public:
+	PReLULayer(const NNVector &weight)
+		: m_weight(weight) {}
+
+	NNMatrixRM *Forward(NNMatrixRM *input) override {
+		*input =
+			input->array().max(NNMatrixRM::Zero(input->rows(), input->cols()).array()) +
+			input->array().min(NNMatrixRM::Zero(input->rows(), input->cols()).array() * m_weight.array());
+		return input;
+	}
+
+	NNVector *ForwardSingle(NNVector *input) override {
+		*input = 
+			input->array().max(NNVector::Zero(input->rows(), input->cols()).array()) +
+			input->array().min(NNVector::Zero(input->rows(), input->cols()).array() * m_weight.array());
+		return input;
+	}
+
+private:
+	NNVector m_weight;
+};
+
+class TanhLayer : public Module
 {
 public:
 	NNMatrixRM *Forward(NNMatrixRM *input) override {
@@ -161,6 +290,38 @@ public:
 		}
 		return input;
 	}
+};
+
+class BatchNormLayer : public Module
+{
+public:
+	BatchNormLayer(float eps, const NNVector &mean, const NNVector &var, const NNVector &weight, const NNVector &bias) {
+		// This module computes y = ((x - mean) / sqrt(var + eps) * weight + bias
+		// That's equivalent to y = (w/sqrt(var + eps)) * x - w*mean/sqrt(var + eps) + bias
+		// or y = ax + b, where a = (w/sqrt(var + eps)), b = bias - w*mean/sqrt(var + eps)
+
+		m_a = weight.array() / (var.array() + eps).sqrt();
+		m_b = bias.array() - weight.array() * mean.array() / (var.array() + eps).sqrt();
+	}
+
+	NNMatrixRM *Forward(NNMatrixRM *input) override {
+		for (int row = 0; row < input->rows(); ++row)
+		{
+			input->row(row).array() *= m_a.array();
+		}
+		input->rowwise() += m_b;
+		return input;
+	}
+
+	NNVector *ForwardSingle(NNVector *input) override {
+		input->array() *= m_a.array();
+		input->array() += m_b.array();
+		return input;
+	}
+
+private:
+	NNVector m_a;
+	NNVector m_b;
 };
 
 #endif // EIGEN_ANN_H
