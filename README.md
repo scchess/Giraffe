@@ -18,6 +18,7 @@ To use Gaviota tablebases with the Wb2Uci adapter, set "GaviotaTbPath=..." in Wb
 * The Makefile contains -march=native. If you want to do a compile that also runs on older CPUs, change it to something else.
 * Only GCC 4.8 or later is supported for now. Intel C/C++ Compiler can be easily supported by just changing compiler options. MSVC is not supported due to use of GCC intrinsics. Patches welcomed to provide alternate code path for MSVC. Clang is not supported due to lack of OpenMP.
 * Tested on Linux (GCC 4.9), OS X (GCC 4.9), Windows (MinGW-W64 GCC 5.1). GCC versions earlier than 4.8 are definitely NOT supported, due to broken regex implementation in libstdc++.
+* Giraffe uses Torch for training. It can be built with or without Torch. Torch is not required if you just want to play against it. See the HAS_TORCH flag in Makefile.
 
 ## Training ##
 Training Giraffe is a multi-step process that will take more than a week on a quad core machine if you want the highest quality results. Using a higher core count machine is recommended (about 3 days on a 20 cores Haswell Xeon).
@@ -28,38 +29,10 @@ Training Giraffe is a multi-step process that will take more than a week on a qu
 
 ```
 #!bash
-OMP_NUM_THREADS=n ./giraffe tdl ccrl.fen
+OMP_NUM_THREADS=n ./giraffe tdl ccrl.fen sts.epd
 ```
-where n is the number of cores you have.
+where n is the number of cores you have, and sts.epd is the EPD you want to test progress on.
 
 It will periodically take a snapshot of the network, and store it in trainingResults/. You can stop the training (Ctrl-C) at any time.
 
 Copy the latest file from trainingResults/ into the parent directory (where giraffe is), and rename it to eval.t7.
-
-It converges in about 72 hours on a 20-core Haswell Xeon (there is currently no automatic convergence detection, so you have to test snapshots periodically yourself, using whatever method you want - I used the STS).
-
-* Generate a database of inner nodes for training the move evaluator network:
-This requires modifying the source code. Go to static_move_evaluator.h, and uncomment "//#define SAMPLING".
-
-Then run:
-```
-#!bash
-OMP_NUM_THREADS=n ./giraffe sample_internal ccrl.fen internal.fen
-```
-
-* Label the internal positions for training the move evaluator network:
-```
-#!bash
-OMP_NUM_THREADS=n ./giraffe label_bm internal.fen internal_labeled.fen
-```
-
-* Finally, we can train the move evaluator network:
-```
-#!bash
-OMP_NUM_THREADS=n ./giraffe train_move_eval internal_labeled.fen meval.t7
-```
-
-That should give you meval.t7 in the end, and we are all done! eval.t7 is the position evaluation network, and meval.t7 is the move evaluation network. They should be in the working directory when giraffe is run. Run ./giraffe on the command line, and make sure that it says it's using the move evaluator network.
-
-## Torch Notes ##
-Set OPENBLAS_NUM_THREADS=1. It's more efficient to do threading at a higher level.
