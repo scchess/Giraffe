@@ -1229,6 +1229,8 @@ std::string Board::MoveToAlg(Move mv, MoveFormat mf)
 	{
 		assert(false);
 	}
+
+	return "";
 }
 
 std::string Board::PVToStr(std::vector<Move> &pv) const
@@ -2321,7 +2323,6 @@ template <Board::MOVE_TYPES MT>
 void Board::GenerateAllPseudoLegalMoves_(MoveList &moveList) const
 {
 	Color sideToMove = m_boardDescU8[SIDE_TO_MOVE];
-
 	GeneratePawnMoves_<MT>(sideToMove, moveList);
 	GenerateKnightMoves_<MT>(sideToMove, moveList);
 	GenerateBishopMoves_<MT>(sideToMove, moveList);
@@ -2656,9 +2657,7 @@ template <Board::MOVE_TYPES MT>
 void Board::GeneratePawnMoves_(Color color, MoveList &moveList) const
 {
 	PieceType pt = WP | color;
-
 	uint64_t pawns = m_boardDescBB[pt];
-
 	uint64_t empty = ~(m_boardDescBB[WHITE_OCCUPIED] | m_boardDescBB[BLACK_OCCUPIED]);
 	uint64_t enemy = m_boardDescBB[WHITE_OCCUPIED | (color ^ COLOR_MASK)];
 

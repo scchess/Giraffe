@@ -58,6 +58,8 @@ TB_pieces PieceTypeToTB(PieceType pt)
 	default:
 		assert(false);
 	}
+
+	return TB_pieces();
 }
 
 void FillPieceListsPT(

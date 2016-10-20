@@ -158,4 +158,6 @@ std::unique_ptr<Module> ReadModule(std::istream &is)
 		std::cerr << "Layer type " << layerType << " not implemented!" << std::endl;
 		assert(false);
 	}
+
+	return std::unique_ptr<Module>();
 }
