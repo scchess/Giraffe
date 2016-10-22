@@ -1,5 +1,12 @@
-HAS_TORCH=1
+HAS_TORCH=0
 TORCH_DIR=~/torch/install
+
+WIN32_CC=i686-w64-mingw32-gcc
+WIN64_CC=x86_64-w64-mingw32-gcc
+WIN32_CXX=i686-w64-mingw32-g++
+WIN64_CXX=x86_64-w64-mingw32-g++
+WIN32_STRIP=i686-w64-mingw32-strip
+WIN64_STRIP=x86_64-w64-mingw32-strip
 
 ifndef CXX
 	CXX=g++
@@ -102,7 +109,7 @@ $(EXE): $(OBJS) gtb/libgtb.a
 	$(Q) $(CXX) $(CXXFLAGS) $(OBJS) -o $(EXE) $(LDFLAGS)
 
 gtb/libgtb.a:
-	$(Q) cd gtb && CC=$(CC) make
+	$(Q) cd gtb && CC=$(CC) CFLAGS=$(CFLAGS) make
 
 test:
 	$(Q) echo $(DEPS)
@@ -112,12 +119,12 @@ clean:
 	$(Q) cd gtb && make clean
 	
 windows:
-	$(Q) cd gtb && make windows_clean && make CFLAGS=-m32
-	g++ $(CXXFLAGS_BASE) -m32 $(INCLUDES) -O3 -static $(CXXFILES) -o giraffe_w32.exe -Lgtb -lgtb
-	strip -g -s giraffe_w32.exe
-	$(Q) cd gtb && make windows_clean && make CFLAGS=-m64
-	g++ $(CXXFLAGS_BASE) -m64 $(INCLUDES) -O3 -static $(CXXFILES) -o giraffe_w64.exe -Lgtb -lgtb
-	strip -g -s giraffe_w64.exe
+	$(Q) cd gtb && make clean && make CFLAGS=-m32 CC=$(WIN32_CC)
+	$(WIN32_CXX) $(CXXFLAGS_BASE) $(INCLUDES) -O3 -static $(CXXFILES) -o giraffe_w32.exe -Lgtb -lgtb -pthread
+	$(WIN32_STRIP) -g -s giraffe_w32.exe
+	$(Q) cd gtb && make clean && make CFLAGS=-m64 CC=$(WIN64_CC)
+	$(WIN64_CXX) $(CXXFLAGS_BASE) $(INCLUDES) -O3 -static $(CXXFILES) -o giraffe_w64.exe -Lgtb -lgtb -pthread
+	$(WIN64_STRIP) -g -s giraffe_w64.exe
 
 no_deps = 
 ifeq ($(MAKECMDGOALS),clean)
