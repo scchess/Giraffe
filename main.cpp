@@ -19,8 +19,8 @@
 #include <fstream>
 #include <string>
 #include <sstream>
-#include <thread>
-#include <mutex>
+#include "thread_wrapper.h"
+#include "mutex_wrapper.h"
 
 #include <cstdint>
 

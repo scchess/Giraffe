@@ -19,8 +19,8 @@
 #define RANDOM_DEVICE_H
 
 #include <random>
-#include <mutex>
-#include <thread>
+#include "mutex_wrapper.h"
+#include "thread_wrapper.h"
 
 #include <cstdint>
 

@@ -19,7 +19,7 @@
 #define BACKEND_H
 
 #include <memory>
-#include <mutex>
+#include "mutex_wrapper.h"
 
 #include "board.h"
 #include "search.h"

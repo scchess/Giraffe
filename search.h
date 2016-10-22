@@ -18,13 +18,13 @@
 #ifndef SEARCH_H
 #define SEARCH_H
 
-#include <thread>
-#include <mutex>
+#include "thread_wrapper.h"
+#include "mutex_wrapper.h"
 #include <atomic>
 #include <memory>
 #include <future>
 #include <functional>
-#include <condition_variable>
+#include "condition_variable_wrapper.h"
 
 #include <cmath>
 
