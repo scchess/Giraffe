@@ -24,7 +24,7 @@
 #include <random>
 #include <functional>
 #include <chrono>
-#include <thread>
+#include "thread_wrapper.h"
 
 #include <cmath>
 
