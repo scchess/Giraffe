@@ -53,7 +53,7 @@ const std::string InitFileName = "init.txt";
 
 std::string gVersion;
 
-void GetVersion()
+void GetGiraffeVersion()
 {
 	std::ifstream verFile("version.txt");
 
@@ -107,7 +107,7 @@ void InitializeFast()
 {
 	std::cout << "# Using " << omp_get_max_threads() << " OpenMP thread(s)" << std::endl;
 
-	GetVersion();
+	GetGiraffeVersion();
 
 #ifdef DEBUG
 	std::cout << "# Running in debug mode" << std::endl;
