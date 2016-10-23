@@ -35,8 +35,6 @@ engine_log.txt
 send.sh
 gtb/libgtb.a
 *.exe
-obj/move_stats/.hidden
-dep/move_stats/.hidden
 trainingResults/*
 *.log
 logs
