@@ -48,15 +48,7 @@ ifeq ($(PG), 1)
 else ifeq ($(DEBUG),1)
 	CXXFLAGS += -g -Og
 else
-	CXXFLAGS += -O3 -flto
-endif
-
-ifeq ($(CLUSTER), 1)
-	CXXFLAGS += -march=sandybridge -static
-	LDFLAGS += -Wl,--whole-archive -lpthread -Wl,--no-whole-archive
-	LDFLAGS := $(filter-out -ltcmalloc,$(LDFLAGS))
-else
-	CXXFLAGS += -march=native
+	CXXFLAGS += -O3 -flto -march=native
 endif
 
 CXXFILES := \
@@ -120,10 +112,10 @@ clean:
 	
 windows:
 	$(Q) cd gtb && make clean && make CFLAGS=-m32 CC=$(WIN32_CC)
-	$(WIN32_CXX) $(CXXFLAGS_BASE) $(INCLUDES) -O3 -static $(CXXFILES) -o giraffe_w32.exe -Lgtb -lgtb -pthread
+	$(WIN32_CXX) $(CXXFLAGS_BASE) $(INCLUDES) -O3 -static -march=pentium2 $(CXXFILES) -o giraffe_w32.exe -Lgtb -lgtb -pthread -static-libgcc -static-libstdc++
 	$(WIN32_STRIP) -g -s giraffe_w32.exe
 	$(Q) cd gtb && make clean && make CFLAGS=-m64 CC=$(WIN64_CC)
-	$(WIN64_CXX) $(CXXFLAGS_BASE) $(INCLUDES) -O3 -static $(CXXFILES) -o giraffe_w64.exe -Lgtb -lgtb -pthread
+	$(WIN64_CXX) $(CXXFLAGS_BASE) $(INCLUDES) -O3 -static -march=nocona $(CXXFILES) -o giraffe_w64.exe -Lgtb -lgtb -pthread -static-libgcc -static-libstdc++
 	$(WIN64_STRIP) -g -s giraffe_w64.exe
 
 no_deps = 
@@ -138,3 +130,8 @@ endif
 ifndef no_deps
 	-include $(DEPS)
 endif
+
+# -march benchmark notes:
+# SSE = +37%
+# SSE2 = +10%
+# little improvement from SSE3
