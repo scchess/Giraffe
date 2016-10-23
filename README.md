@@ -29,6 +29,7 @@ Training Giraffe is a multi-step process that will take more than a week on a qu
 
 ```
 #!bash
+mkdir trainingResults
 OMP_NUM_THREADS=n ./giraffe tdl ccrl.fen sts.epd
 ```
 where n is the number of cores you have, and sts.epd is the EPD you want to test progress on.
