@@ -292,14 +292,6 @@ void PushSquareFeatures(std::vector<T> &ret, const Board &/*board*/, AttackMaps 
 		{
 			Square sq = Sq(x, y);
 			PushPosFloat(ret, sq, atkMaps.whiteCtrl[sq], group);
-		}
-	}
-
-	for (int y = 0; y < 8; ++y)
-	{
-		for (int x = 0; x < 8; ++x)
-		{
-			Square sq = Sq(x, y);
 			PushPosFloat(ret, sq, atkMaps.blackCtrl[sq], group + 1);
 		}
 	}
