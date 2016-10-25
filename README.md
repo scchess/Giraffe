@@ -13,6 +13,8 @@ To use Gaviota tablebases, set the path through the GaviotaTbPath option.
 
 To use Gaviota tablebases with the Wb2Uci adapter, set "GaviotaTbPath=..." in Wb2Uci.eng.
 
+Alternatively, set the GTBPath environment variable to point to the tablebases.
+
 ## Build ##
 * The Makefile contains -ltcmalloc. libtcmalloc replaces malloc/free with another implementation with thread-local caching. It is optional and doesn't really matter for playing. It can be safely removed. Or you can install the library. It's in the libgoogle-perftools-dev package on Ubuntu (and probably other Debian-based distros). It makes training on many cores faster.
 * The Makefile contains -march=native. If you want to do a compile that also runs on older CPUs, change it to something else.
