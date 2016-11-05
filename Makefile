@@ -1,4 +1,4 @@
-HAS_TORCH=0
+HAS_TORCH=1
 TORCH_DIR=~/torch/install
 
 WIN32_CC=i686-w64-mingw32-gcc

@@ -72,10 +72,8 @@ void GetGiraffeVersion()
 #endif
 }
 
-void InitializeSlow(ANNEvaluator &evaluator, ANNMoveEvaluator &mevaluator, std::mutex &mtx)
+void InitializeNetworks(ANNEvaluator &evaluator, ANNMoveEvaluator &mevaluator)
 {
-	std::string initOutput;
-
 	std::ifstream evalNet(EvalNetFilename);
 
 	if (evalNet)
@@ -90,20 +88,11 @@ void InitializeSlow(ANNEvaluator &evaluator, ANNMoveEvaluator &mevaluator, std::
 		mevaluator.Deserialize(MoveEvalNetFilename);
 	}
 
-	initOutput += GTB::Init();
-
-	std::lock_guard<std::mutex> lock(mtx);
-	std::cout << initOutput;
-}
-
-void InitializeSlowBlocking(ANNEvaluator &evaluator, ANNMoveEvaluator &mevaluator)
-{
-	std::mutex mtx;
-	InitializeSlow(evaluator, mevaluator, mtx);
+	std::cout << GTB::Init();
 }
 
 // fast initialization steps that can be done in main thread
-void InitializeFast()
+void Initialize()
 {
 	std::cout << "# Using " << omp_get_max_threads() << " OpenMP thread(s)" << std::endl;
 
@@ -134,11 +123,13 @@ void InitializeFast()
 
 int main(int argc, char **argv)
 {
-	InitializeFast();
+	Initialize();
 
 	ANNEvaluator evaluator;
 
 	ANNMoveEvaluator mevaluator(evaluator);
+
+	InitializeNetworks(evaluator, mevaluator);
 
 	Backend backend;
 
@@ -182,8 +173,6 @@ int main(int argc, char **argv)
 	// first we handle special operation modes
 	if (argc >= 2 && std::string(argv[1]) == "tdl")
 	{
-		InitializeSlowBlocking(evaluator, mevaluator);
-
 		if (argc < 4)
 		{
 			std::cout << "Usage: " << argv[0] << " tdl positions sts_filename" << std::endl;
@@ -196,8 +185,6 @@ int main(int argc, char **argv)
 	}
 	else if (argc >= 2 && std::string(argv[1]) == "conv")
 	{
-		InitializeSlowBlocking(evaluator, mevaluator);
-
 		if (argc < 3)
 		{
 			std::cout << "Usage: " << argv[0] << " conv FEN" << std::endl;
@@ -225,8 +212,6 @@ int main(int argc, char **argv)
 	}
 	else if (argc >= 2 && std::string(argv[1]) == "mconv")
 	{
-		InitializeSlowBlocking(evaluator, mevaluator);
-
 		if (argc < 3)
 		{
 			std::cout << "Usage: " << argv[0] << " mconv FEN" << std::endl;
@@ -264,8 +249,6 @@ int main(int argc, char **argv)
 	}
 	else if (argc >= 2 && std::string(argv[1]) == "bench")
 	{
-		InitializeSlowBlocking(evaluator, mevaluator);
-
 		double startTime = CurrentTime();
 
 		static const NodeBudget BenchNodeBudget = 64*1024*1024;
@@ -284,8 +267,6 @@ int main(int argc, char **argv)
 	else if (argc >= 2 && std::string(argv[1]) == "sample_internal")
 	{
 		// MUST UNCOMMENT "#define SAMPLING" in static move evaluator
-
-		InitializeSlowBlocking(evaluator, mevaluator);
 
 		if (argc < 4)
 		{
@@ -337,8 +318,6 @@ int main(int argc, char **argv)
 	}
 	else if (argc >= 2 && std::string(argv[1]) == "label_bm")
 	{
-		InitializeSlowBlocking(evaluator, mevaluator);
-
 		if (argc < 4)
 		{
 			std::cout << "Usage: " << argv[0] << " label_bm <EPD/FEN file> <output file>" << std::endl;
@@ -434,8 +413,6 @@ int main(int argc, char **argv)
 	}
 	else if (argc >= 2 && std::string(argv[1]) == "train_move_eval")
 	{
-		InitializeSlowBlocking(evaluator, mevaluator);
-
 		if (argc < 4)
 		{
 			std::cout << "Usage: " << argv[0] << " train_move_eval <EPD/FEN file> <output file>" << std::endl;
@@ -508,8 +485,6 @@ int main(int argc, char **argv)
 	}
 	else if (argc >= 2 && std::string(argv[1]) == "move_stats")
 	{
-		InitializeSlowBlocking(evaluator, mevaluator);
-
 		if (argc < 3)
 		{
 			std::cout << "Usage: " << argv[0] << " move_stats <labeled FEN>" << std::endl;
@@ -520,17 +495,6 @@ int main(int argc, char **argv)
 
 		return 0;
 	}
-
-	// we need a mutex here because InitializeSlow needs to print, and it may decide to
-	// print at the same time as the main command loop (if the command loop isn't waiting)
-	std::mutex coutMtx;
-
-	coutMtx.lock();
-
-	// do all the heavy initialization in a thread so we can reply to "protover 2" in time
-	std::thread initThread(InitializeSlow, std::ref(evaluator), std::ref(mevaluator), std::ref(coutMtx));
-
-	auto waitForSlowInitFunc = [&initThread, &coutMtx]() { coutMtx.unlock(); initThread.join(); coutMtx.lock(); };
 
 	std::ifstream initFile(InitFileName);
 
@@ -543,9 +507,7 @@ int main(int argc, char **argv)
 		}
 		else
 		{
-			coutMtx.unlock();
 			std::getline(std::cin, lineStr);
-			coutMtx.lock();
 		}
 
 		std::stringstream line(lineStr);
@@ -553,22 +515,6 @@ int main(int argc, char **argv)
 		// we set usermove=1, so all commands from xboard start with a unique word
 		std::string cmd;
 		line >> cmd;
-
-		// this is the list of commands we can process before initialization finished
-		if (
-			cmd != "xboard" &&
-			cmd != "protover" &&
-			cmd != "hard" &&
-			cmd != "easy" &&
-			cmd != "cores" &&
-			cmd != "memory" &&
-			cmd != "accepted" &&
-			cmd != "rejected" &&
-			initThread.joinable())
-		{
-			// wait for initialization to be done
-			waitForSlowInitFunc();
-		}
 
 		if (cmd == "xboard") {} // ignore since we only support xboard mode anyways
 		else if (cmd == "protover")
